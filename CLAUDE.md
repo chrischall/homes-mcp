@@ -1,0 +1,159 @@
+# CLAUDE.md — homes-mcp
+
+Guidance for Claude working in this repo.
+
+## TL;DR
+
+v0.1.0: homes.com MCP server. Default and only transport: localhost WebSocket via [`@fetchproxy/server`](https://github.com/chrischall/fetchproxy) — the companion browser extension is installed separately rather than embedded. Every HTTP call to homes.com is dispatched through the user's signed-in Chrome tab — each request rides their existing session (cookies, TLS, JS context) exactly as if they'd clicked it themselves.
+
+This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not "Pattern B" (one bootstrap call then direct fetch). homes.com gates traffic through AWS WAF at the session level, so the in-session routing has to be per-call.
+
+## Tool surface
+
+| Tool | File | Endpoint | Kind |
+| --- | --- | --- | --- |
+| `homes_search_properties` | `tools/search.ts` | `GET /<city-slug>-<state>/` SSR — parse JSON-LD `CollectionPage.mainEntity.itemListElement[]` | read |
+| `homes_get_property` | `tools/properties.ts` | `GET /property/<slug>/<propertyId>/` SSR — parse JSON-LD `RealEstateListing` node | read |
+| `homes_get_property_photos` | `tools/photos.ts` | Same SSR page as `get_property` — scrape `<img>` tags filtered to the homes.com CDN | read |
+| `homes_compare_properties` | `tools/compare.ts` | Concurrent `get_property` calls across N targets | read |
+| `homes_calculate_mortgage` | `tools/mortgage.ts` | (local; no network) | read |
+| `homes_calculate_affordability` | `tools/affordability.ts` | (local; no network) | read |
+| `homes_healthcheck` | `tools/healthcheck.ts` | `/robots.txt` round-trip + bridge diagnostics | read |
+
+## Architecture
+
+```
+src/
+  index.ts              # entry — builds FetchproxyTransport, HomesClient,
+                        #   registers tool groups, connects stdio transport
+  transport.ts          # HomesTransport interface
+  transport-fetchproxy.ts # adapter over @fetchproxy/server's FetchproxyServer
+  client.ts             # HomesClient.fetchHtml / fetchJson
+                        #   + sign-in detection (WAF challenge / /sign-in redirect)
+  page-state.ts         # extractJsonLd + findGraphNode helpers
+  url.ts                # urlToPath + locationToSlug
+  mcp.ts                # textResult() result-wrapper
+  tools/
+    search.ts           # homes_search_properties (buildSearchPath + formatHome)
+    properties.ts       # homes_get_property (fetchListingRecord + format)
+    photos.ts           # homes_get_property_photos (<img> scrape, CDN-filtered)
+    compare.ts          # homes_compare_properties (concurrent get_property)
+    mortgage.ts         # homes_calculate_mortgage (local PITI)
+    affordability.ts    # homes_calculate_affordability (local DTI math)
+    healthcheck.ts      # homes_healthcheck (round-trips /robots.txt)
+
+tests/                  # 1:1 mirror of src/, plus tests/helpers.ts harness.
+                        #   All tests mock HomesClient.fetchHtml.
+```
+
+Each `tools/*.ts` file exports `registerXxxTools(server, client)` (or `(server)` for the local-only tools); `src/index.ts` calls all of them.
+
+## Commands
+
+```bash
+npm run build          # tsc --noEmit + esbuild bundle → dist/bundle.js
+npm test               # vitest, mocked transport, no network
+npm run test:watch
+npm run test:coverage  # v8 coverage, no thresholds
+npx tsc --noEmit       # typecheck only
+node dist/bundle.js    # launch the MCP server over stdio (also opens WS)
+```
+
+## Environment
+
+No env vars required. Auth lives in the user's signed-in homes.com tab via the fetchproxy extension.
+
+Optional:
+
+```
+HOMES_WS_PORT=37149   # override the fetchproxy WebSocket port
+```
+
+## Conventions
+
+- All tools prefixed `homes_*`.
+- Tool return shape: `textResult(data)` from `src/mcp.ts` → `{ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }`. Don't hand-roll the wrapper.
+- Tool annotations: every tool sets `title`, `readOnlyHint: true`, `idempotentHint: true`, and `openWorldHint`. The last is `true` for network-bound tools and `false` for `homes_calculate_mortgage` / `homes_calculate_affordability` (pure local computation).
+- Path-only inputs to `HomesClient`: pass `/some/path?with=query`, never a full URL. `FetchproxyTransport` prepends `https://www.homes.com`. When a tool takes a `url` arg from the user, reduce it via `urlToPath` from `src/url.ts`.
+- Write a failing test before implementation (TDD).
+- ESM + NodeNext: imports use `.js` extensions even for `.ts` source.
+- stdio transport: log warnings/banners to **stderr** only — stdout is reserved for JSON-RPC.
+
+## homes.com quirks
+
+- **No JSON API.** homes.com doesn't expose `/api/...` endpoints we can call directly from a signed-in browser. Every tool extracts state from the SSR HTML.
+- **One JSON-LD blob per page.** Every page type (search results and property detail) embeds exactly one `<script type="application/ld+json">` with an `@graph` array. `src/page-state.ts` parses it with `extractJsonLd(html)` and walks the graph with `findGraphNode(doc, type)`.
+- **Search vs. detail shape.** Search pages put the listings in `CollectionPage.mainEntity.itemListElement[]`; each item is tagged `[RealEstateListing, Product]` with a nested `mainEntity` carrying address/size. Search items LACK `geo` — lat/lng appears only on the property detail page. Detail pages emit a single `[RealEstateListing, Product]` graph node with `datePosted`, `dateModified`, `mainEntity.geo`, `mainEntity.yearBuilt`, and `offers.offeredBy[]` (the listing agent).
+- **Property URL shape.** Detail URLs look like `https://www.homes.com/property/<address-slug>/<propertyId>/`, where `<propertyId>` is a base36-ish token (e.g. `rxrzwg0kjnr32`). We treat the last non-empty path segment as the stable identifier.
+- **Photos are DOM-only.** The JSON-LD only carries one primary image (plus `primaryImageOfPage`). The real gallery lives in `<img>` tags on the detail page — `tools/photos.ts` scrapes those and filters to URLs containing `homes.com` (the CDN host).
+- **No price-history, saved-listings, or market-report surface.** These are auth-gated or unavailable in the SSR HTML, so v0.1 ships without them entirely (tools deleted, not stubbed).
+- **Sign-in detection.** `src/client.ts::throwIfSignInPage` flags `/sign-in` URL redirects and the AWS WAF challenge interstitial (body matches both `awswaf.com` AND `challenge.js` AND body < 80 KB). CoStar (homes.com's parent) sits behind AWS WAF.
+
+## Publishing constraints
+
+The MCP Registry's [server.schema.json](https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json) caps `server.json`'s `description` at **100 characters**. Values over that fail `mcp-publisher publish` with HTTP 422 (`validation failed: expected length <= 100, location: body.description`). The other description fields (`manifest.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`) have no published length constraint and can stay longer.
+
+Sanity-check before committing a description change:
+
+```bash
+jq -r '.description | length' server.json
+```
+
+## Versioning
+
+Version appears in SEVEN places — all must match. `release-please-config.json` registers them as `extra-files` and bumps them in one PR per release:
+
+1. `package.json` → `"version"`
+2. `package-lock.json` → kept in sync by `npm install --package-lock-only`
+3. `src/index.ts` → `VERSION` const (annotated with `// x-release-please-version`) + startup banner
+4. `manifest.json` → `"version"`
+5. `server.json` → `"version"` and `packages[].version`
+6. `.claude-plugin/plugin.json` → `"version"`
+7. `.claude-plugin/marketplace.json` → `metadata.version` + `plugins[].version`
+
+### Release flow
+
+Commits land on `main` via PR. release-please (`.github/workflows/release-please.yml`) opens or updates a release PR whenever Conventional-Commit messages (`feat:`, `fix:`, etc.) accumulate. Merging the release PR creates the tag and a GitHub Release; the `publish` job then packs `.mcpb` + `.skill`, publishes to npm with provenance, and pushes to the MCP Registry.
+
+### Important
+
+Do NOT manually bump versions or create tags unless the user explicitly asks. release-please owns versioning.
+
+## Pull requests & release notes
+
+**Default workflow: branch + PR, even for solo work.** Direct pushes to `main` skip review *and* the auto-generated release notes block (configured in `.github/release.yml`).
+
+For every PR, apply exactly one label:
+
+| Label                  | Section in release notes |
+|------------------------|--------------------------|
+| `enhancement`          | Features                 |
+| `bug`                  | Bug Fixes                |
+| `security`             | Security                 |
+| `refactor`             | Refactor                 |
+| `documentation`        | Documentation            |
+| `test`                 | Tests                    |
+| `dependencies`         | Dependencies             |
+| `ci` / `github_actions`| CI & Build               |
+| *(none / unmatched)*   | Other Changes            |
+| `ignore-for-release`   | Hidden from notes        |
+
+### How PRs merge
+
+**Don't run `gh pr merge` yourself.** The automation does it:
+
+1. `pr-auto-review.yml` runs a Claude review on every PR **except** the release-please release PR (which it deliberately skips). On a `pass` verdict it adds the `ready-to-merge` label.
+2. `auto-merge.yml`, on the `ready-to-merge` label (or on a dependabot PR), arms `gh pr merge --auto --squash`. The moment CI is green the PR squash-merges itself.
+
+For ordinary feature/fix PRs, opening with `gh pr create --label <label>` (or `--label ignore-for-release` for chores not worth a release-notes line) is the whole job. If Claude's verdict was `warn`/`fail` but you've decided to ship anyway, add the label yourself: `gh pr edit <num> --add-label ready-to-merge`.
+
+**Release PRs are the one manual touch.** release-please opens its own release PR and leaves it open as your staging artifact — `pr-auto-review.yml` skips it on purpose, so it sits there accumulating changes until you decide to ship. When you're ready, add `ready-to-merge` to it the same way: `gh pr edit <num> --add-label ready-to-merge`. The `auto-merge.yml` arm then takes over and the publish job fires the moment the release PR lands.
+
+The repo allows squash-merge only — `--merge` and `--rebase` are blocked at the branch-protection ruleset level.
+
+## What to not do
+
+- Don't add IP-rotation or TLS-impersonation libraries. The whole design is "every request rides the user's own browser session via fetchproxy." Adding cycletls / curl-impersonate / Playwright would replace that with a separate stand-in identity — which both defeats the design and adds engineering surface.
+- Don't paste cookies or env-configure auth. Auth lives in the browser.
+- Don't register tools that can't be tested against a mock `HomesClient`. All tool logic should be behind `fetchHtml` so tests can drive it without a real WS.
+- Don't bump versions speculatively. release-please owns that.

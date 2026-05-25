@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.chrischall/homes-mcp",
+  "description": "homes.com real-estate for Claude — search, property details, photos, compare, mortgage math",
+  "repository": {
+    "url": "https://github.com/chrischall/homes-mcp",
+    "source": "github"
+  },
+  "version": "0.6.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "homes-mcp",
+      "version": "0.6.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "HOMES_WS_PORT",
+          "description": "Override the fetchproxy WebSocket port (default 37149).",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

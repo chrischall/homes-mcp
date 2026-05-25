@@ -1,0 +1,35 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "homes-mcp",
+  "owner": {
+    "name": "Chris Hall",
+    "email": "chris.c.hall@gmail.com"
+  },
+  "metadata": {
+    "description": "MCP server for homes.com — search listings, fetch property details, photo galleries, compare properties. Routes through the user signed-in homes.com tab via the fetchproxy browser extension to dodge bot detection.",
+    "version": "0.6.0"
+  },
+  "plugins": [
+    {
+      "name": "homes-mcp",
+      "displayName": "homes.com",
+      "source": "./",
+      "description": "MCP server for homes.com — search listings, get property details, photo galleries, compare properties",
+      "version": "0.6.0",
+      "author": {
+        "name": "Chris Hall"
+      },
+      "homepage": "https://github.com/chrischall/homes-mcp",
+      "repository": "https://github.com/chrischall/homes-mcp",
+      "license": "MIT",
+      "keywords": [
+        "homes",
+        "real-estate",
+        "property",
+        "housing",
+        "mcp"
+      ],
+      "category": "productivity"
+    }
+  ]
+}
