@@ -179,12 +179,19 @@ function brokerageFrom(agent: JsonLdAgent | undefined): string | undefined {
 }
 
 /**
- * Derive a homes.com property id from a listing's `@id` or `url`. We
+ * Derive a homes.com property id from a listing's `url` or `@id`. We
  * take the last non-empty path segment (e.g. `rxrzwg0kjnr32`).
+ *
+ * Prefer `url` over `@id` because homes.com's @id now includes a
+ * `#realestatelisting` fragment (e.g. `.../abc123/#realestatelisting`)
+ * — taking the last path segment would otherwise return the fragment
+ * instead of the id. The `url` field is fragment-free.
  */
 export function extractPropertyId(listing: JsonLdListing): string {
-  const source = listing['@id'] ?? listing.url ?? '';
-  const path = source.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*$/, '');
+  const source = listing.url ?? listing['@id'] ?? '';
+  const path = source
+    .replace(/^https?:\/\/[^/]+/, '')
+    .replace(/[?#].*$/, '');
   const segments = path.split('/').filter((s) => s.length > 0);
   return segments[segments.length - 1] ?? '';
 }

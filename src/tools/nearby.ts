@@ -2,95 +2,89 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
-import {
-  parseHtml,
-  findLinksUnderHeading,
-  parseDollar,
-  parseIntegerLoose,
-  type HTMLElement,
-} from '../html.js';
+import { parseHtml, type HTMLElement } from '../html.js';
 import { urlToPath } from '../url.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 
 /**
  * homes.com renders a "Homes for Sale Near This Property" section near
- * the bottom of every property detail page. Each card is an <a> wrapping
- * the property link plus address/price/bed/bath/sqft spans. We scrape
- * those into a flat NearbyListing[].
+ * the bottom of every property detail page — but the section is
+ * **anchorless** (no heading element), which broke the original
+ * heading-based scraper.
  *
- * Note: these are nearby active listings homes.com curates — NOT a comp-
- * sales set or the user's saved homes. The tool name avoids "comparable"
- * to keep that distinction clear.
+ * The data lives in a tabbed `<section class="nearby-links-section-dt-v2">`
+ * with four lists, keyed by id (verified live 2026-05-26):
+ *
+ *   <ul id="nb-Property"> — 20 nearby for-sale listings (tab: "Homes for Sale")
+ *   <ul id="nb-Neighborhood"> — nearby neighborhood names (no property links)
+ *   <ul id="nb-City"> — nearby city names (no property links)
+ *   <ul id="nb-property"> — 20 nearby rentals (tab: "Rentals")
+ *
+ * Each `<li>` is minimal:
+ *
+ *   <li><a class="text-only" href="/property/<slug>/<id>/" title="<address>">
+ *     <address>
+ *   </a></li>
+ *
+ * No price, beds, baths, sqft, or photo — those fields are only on the
+ * cards used elsewhere on the page. So the canonical return shape is
+ * `{ property_id, url, address, tab }`.
  */
+
+export type NearbyTab = 'for_sale' | 'for_rent';
 
 export interface NearbyListing {
   property_id: string;
   url: string;
   address?: string;
-  price?: number;
-  beds?: number;
-  baths?: number;
-  sqft?: number;
-  primary_photo_url?: string;
+  tab: NearbyTab;
 }
 
 const PROPERTY_LINK_RE = /\/property\/[^/]+\/([^/]+)\/?$/;
 
-export function parseNearbyListings(root: HTMLElement): NearbyListing[] {
-  // homes.com uses several headings interchangeably across listings. Try
-  // each — first match wins.
-  const HEADINGS = ['Homes for Sale Near', 'Homes for Sale', 'Similar Homes', 'Nearby Homes'];
-  let links: HTMLElement[] = [];
-  for (const h of HEADINGS) {
-    links = findLinksUnderHeading(root, h);
-    if (links.length > 0) break;
-  }
-  if (links.length === 0) return [];
+const TAB_LIST_IDS: Record<NearbyTab, string> = {
+  for_sale: 'nb-Property',
+  for_rent: 'nb-property',
+};
 
-  const seen = new Set<string>();
+function readListItems(root: HTMLElement, tab: NearbyTab): NearbyListing[] {
+  const ul = root.querySelector(`ul#${TAB_LIST_IDS[tab]}`);
+  if (!ul) return [];
   const out: NearbyListing[] = [];
-  for (const a of links) {
+  const seen = new Set<string>();
+  for (const a of ul.querySelectorAll('a[href*="/property/"]')) {
     const href = a.getAttribute('href') ?? '';
     const m = PROPERTY_LINK_RE.exec(href.replace(/^https?:\/\/[^/]+/, ''));
     if (!m) continue;
     const id = m[1];
     if (seen.has(id)) continue;
     seen.add(id);
-    const text = a.text;
-    const priceM = /\$([0-9,]+)/.exec(text);
-    const bedsM = /(\d+)\s*bd/i.exec(text);
-    const bathsM = /(\d+(?:\.\d+)?)\s*ba/i.exec(text);
-    const sqftM = /([0-9,]+)\s*sq\s*ft/i.exec(text);
-    const addrEl = a.querySelector('.address, [class*="address" i]');
-    const photoEl = a.querySelector('img');
-    const item: NearbyListing = {
+    const address =
+      a.getAttribute('title')?.trim() || a.text.replace(/\s+/g, ' ').trim();
+    out.push({
       property_id: id,
       url: href.startsWith('http')
         ? href
         : `https://www.homes.com${href.startsWith('/') ? href : '/' + href}`,
-    };
-    if (addrEl) item.address = addrEl.text.replace(/\s+/g, ' ').trim();
-    if (priceM) {
-      const n = parseDollar(priceM[1]);
-      if (n !== undefined) item.price = n;
-    }
-    if (bedsM) {
-      const n = parseIntegerLoose(bedsM[1]);
-      if (n !== undefined) item.beds = n;
-    }
-    if (bathsM) {
-      const n = Number(bathsM[1]);
-      if (Number.isFinite(n)) item.baths = n;
-    }
-    if (sqftM) {
-      const n = parseIntegerLoose(sqftM[1]);
-      if (n !== undefined) item.sqft = n;
-    }
-    if (photoEl) {
-      const src = photoEl.getAttribute('src');
-      if (src) item.primary_photo_url = src;
-    }
-    out.push(item);
+      address: address || undefined,
+      tab,
+    });
+  }
+  return out;
+}
+
+/**
+ * Parse the nearby-listings section from a property detail page's
+ * rendered HTML. Returns the For Sale tab by default; pass
+ * `include_rentals: true` to also collect the Rentals tab.
+ */
+export function parseNearbyListings(
+  root: HTMLElement,
+  opts: { include_rentals?: boolean } = {}
+): NearbyListing[] {
+  const out = readListItems(root, 'for_sale');
+  if (opts.include_rentals) {
+    out.push(...readListItems(root, 'for_rent'));
   }
   return out;
 }
@@ -105,7 +99,9 @@ function originPropertyId(html: string, fallbackUrl: string): string {
   const node = findGraphNode(doc, 'RealEstateListing') as
     | { '@id'?: string; url?: string }
     | null;
-  const src = node?.['@id'] ?? node?.url ?? fallbackUrl;
+  // Prefer node.url over node['@id'] — homes.com @id carries a
+  // `#realestatelisting` fragment that breaks last-segment extraction.
+  const src = node?.url ?? node?.['@id'] ?? fallbackUrl;
   return propertyIdFromUrl(src);
 }
 
@@ -118,7 +114,7 @@ export function registerNearbyTools(
     {
       title: 'Get nearby homes.com listings for a property',
       description:
-        "Scrape the 'Homes for Sale Near This Property' section of a homes.com detail page and return the nearby active listings: id, URL, address, price, beds, baths, sqft, primary photo. Pass `url` (the property whose neighborhood to inspect). Optional `limit` caps the count. Returns `{ property_id, url, count, listings[] }`. Note: these are nearby listings homes.com chose to surface; not a true comp-sales set. Read-only; safe to call repeatedly.",
+        "Scrape the nearby-links section of a homes.com detail page (the tabbed list of `<ul id=\"nb-Property\">` near the bottom of the page) and return the nearby active listings. Pass `url` (the property whose neighborhood to inspect). By default returns the For Sale tab; pass `include_rentals: true` to also include the Rentals tab. Optional `limit` caps the count. Returns `{ property_id, url, count, listings: [{ property_id, url, address?, tab }] }`. Note: the nearby section is a curated cross-link list, not a comparable-sales set — only URL + address are exposed (no price/beds/baths/sqft/photo). To enrich a row, call `homes_get_property` on its url. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Get nearby homes.com listings for a property',
         readOnlyHint: true,
@@ -133,13 +129,19 @@ export function registerNearbyTools(
           .positive()
           .optional()
           .describe('Max nearby listings to return (default unlimited).'),
+        include_rentals: z
+          .boolean()
+          .optional()
+          .describe(
+            'When true, also include the Rentals tab (`<ul id="nb-property">` lowercase). Default false — For Sale tab only.'
+          ),
       },
     },
-    async ({ url, limit }) => {
+    async ({ url, limit, include_rentals }) => {
       const path = urlToPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
-      const all = parseNearbyListings(root);
+      const all = parseNearbyListings(root, { include_rentals });
       const listings = limit !== undefined ? all.slice(0, limit) : all;
       return textResult({
         property_id: originPropertyId(html, url),

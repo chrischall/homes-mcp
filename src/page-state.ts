@@ -17,13 +17,19 @@
  * `https://www.homes.com/property/<slug>/<id>/`) the graph contains a
  * `[RealEstateListing, Product]` node and a `BreadcrumbList`.
  *
- * Because the JSON-LD block is plain JSON (not a JS literal), a single
- * regex + `JSON.parse` is enough — no balanced-brace state machine
- * needed.
- *
- * Verified live 2026-05-24 against:
+ * Verified live 2026-05-26:
  *   - https://www.homes.com/atlanta-ga/
  *   - https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/
+ *
+ * **HTML-entity gotcha.** homes.com emits the script type attribute
+ * with the `+` encoded as `&#x2B;`:
+ *   `<script type="application/ld&#x2B;json">…</script>`
+ * The browser decodes that at parse time, so DOM queries with
+ * `script[type="application/ld+json"]` still match. A raw-text regex
+ * looking for the literal string `application/ld+json` does NOT.
+ *
+ * We use `node-html-parser` here so attribute values are entity-decoded
+ * before matching — that's the load-bearing reason for the dep choice.
  */
 
 /** A JSON-LD document as emitted by homes.com. Top-level shape: `{ "@context", "@graph" }`. */
@@ -43,10 +49,16 @@ export interface JsonLdNode {
   [key: string]: unknown;
 }
 
+import { parseHtml } from './html.js';
+
 /**
  * Find and parse the first `<script type="application/ld+json">` block
  * in `html`. Returns the parsed JSON-LD document, or null when no such
  * block exists or it fails to parse.
+ *
+ * Uses `node-html-parser` so attribute values are HTML-entity-decoded
+ * before matching — homes.com emits `application/ld&#x2B;json` in the
+ * raw SSR, and a literal-text regex would miss it.
  *
  * If a page emits the JSON-LD as a single root node (rather than the
  * `{ @context, @graph }` envelope), we wrap it into a synthetic graph
@@ -54,27 +66,25 @@ export interface JsonLdNode {
  * across both shapes.
  */
 export function extractJsonLd(html: string): JsonLdDoc | null {
-  // Tolerate any attribute order/whitespace around `type="application/ld+json"`.
-  // The `[\s\S]*?` body is lazy so we stop at the first `</script>`.
-  const re =
-    /<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i;
-  const match = re.exec(html);
-  if (!match) return null;
-  const raw = match[1].trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
+  const root = parseHtml(html);
+  const scripts = root.querySelectorAll('script[type="application/ld+json"]');
+  for (const script of scripts) {
+    const raw = script.textContent.trim();
+    if (!raw) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object') continue;
+    const doc = parsed as JsonLdDoc;
+    if (!doc['@graph'] && doc['@type']) {
+      return { '@context': doc['@context'], '@graph': [doc as JsonLdNode] };
+    }
+    return doc;
   }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const doc = parsed as JsonLdDoc;
-  // Normalise: if the doc has no `@graph` but does declare its own
-  // `@type`, treat the whole doc as a single graph node.
-  if (!doc['@graph'] && doc['@type']) {
-    return { '@context': doc['@context'], '@graph': [doc as JsonLdNode] };
-  }
-  return doc;
+  return null;
 }
 
 /**

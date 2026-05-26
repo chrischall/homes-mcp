@@ -126,9 +126,14 @@ function firstImage(image: string | string[] | undefined): string | undefined {
  * the search results into a stable identifier callers can use.
  */
 export function extractPropertyId(item: JsonLdListingItem): string {
-  const source = item['@id'] ?? item.url ?? '';
-  // Take the last non-empty segment of the path.
-  const path = source.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*$/, '');
+  // Prefer `url` over `@id` because homes.com's @id now includes a
+  // `#realestatelisting` fragment — if @id is "…/abc123/#realestatelisting"
+  // and we take the last path segment, we get the fragment, not the id.
+  // The `url` field is the canonical, fragment-free property URL.
+  const source = item.url ?? item['@id'] ?? '';
+  const path = source
+    .replace(/^https?:\/\/[^/]+/, '')
+    .replace(/[?#].*$/, '');
   const segments = path.split('/').filter((s) => s.length > 0);
   return segments[segments.length - 1] ?? '';
 }

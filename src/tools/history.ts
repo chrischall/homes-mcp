@@ -163,8 +163,14 @@ function extractPropertyIdFromHtml(html: string, fallbackUrl: string): string {
   const node = findGraphNode(doc, 'RealEstateListing') as
     | { '@id'?: string; url?: string }
     | null;
-  const src = node?.['@id'] ?? node?.url ?? fallbackUrl;
-  const segments = src.replace(/^https?:\/\/[^/]+/, '').split('/').filter(Boolean);
+  // Prefer node.url over node['@id'] — see properties.ts:extractPropertyId
+  // (homes.com @id now carries a `#realestatelisting` fragment).
+  const src = node?.url ?? node?.['@id'] ?? fallbackUrl;
+  const segments = src
+    .replace(/^https?:\/\/[^/]+/, '')
+    .replace(/[?#].*$/, '')
+    .split('/')
+    .filter(Boolean);
   return segments[segments.length - 1] ?? '';
 }
 

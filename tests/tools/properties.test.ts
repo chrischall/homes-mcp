@@ -52,6 +52,23 @@ describe('extractPropertyId', () => {
   it('falls back to @id when url is missing', () => {
     expect(extractPropertyId({ '@id': 'https://www.homes.com/property/x/abc/' })).toBe('abc');
   });
+
+  it('strips #realestatelisting fragments from @id (homes.com SSR adds them)', () => {
+    expect(
+      extractPropertyId({
+        '@id': 'https://www.homes.com/property/x/abc123/#realestatelisting',
+      })
+    ).toBe('abc123');
+  });
+
+  it('prefers url over @id when both are present', () => {
+    expect(
+      extractPropertyId({
+        '@id': 'https://www.homes.com/property/x/abc123/#realestatelisting',
+        url: 'https://www.homes.com/property/x/abc123/',
+      })
+    ).toBe('abc123');
+  });
 });
 
 describe('findListing', () => {

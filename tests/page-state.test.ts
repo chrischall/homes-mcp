@@ -34,6 +34,29 @@ describe('extractJsonLd', () => {
     expect(doc?.['@graph']?.[0]?.['@type']).toBe('BreadcrumbList');
   });
 
+  it('matches when the script type attribute encodes "+" as the HTML entity &#x2B;', () => {
+    // homes.com SSR emits  <script type="application/ld&#x2B;json">  literally
+    // — the browser decodes the entity at parse time so DOM queries on
+    // `script[type="application/ld+json"]` still match. We parse the
+    // HTML rather than regex the raw text so we get the same
+    // entity-decoding behaviour. Verified live 2026-05-26.
+    const html = `<html><head>
+      <script type="application/ld&#x2B;json">{"@context":"https://schema.org","@graph":[{"@type":"RealEstateListing","name":"X"}]}</script>
+    </head></html>`;
+    const doc = extractJsonLd(html);
+    expect(doc?.['@context']).toBe('https://schema.org');
+    expect(doc?.['@graph']?.[0]?.['@type']).toBe('RealEstateListing');
+  });
+
+  it('skips empty script blocks and continues to the next', () => {
+    // Defensive: some pages emit a placeholder empty JSON-LD script
+    // followed by the real one. Don't return null on the first.
+    const html = `<script type="application/ld+json"></script>
+      <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"CollectionPage"}]}</script>`;
+    const doc = extractJsonLd(html);
+    expect(doc?.['@graph']?.[0]?.['@type']).toBe('CollectionPage');
+  });
+
   it('wraps a graph-less single-node doc into a synthetic one-element graph', () => {
     // homes.com today always emits a `@graph` envelope, but the spec
     // allows a single root node. We normalise so findGraphNode works

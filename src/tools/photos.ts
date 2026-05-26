@@ -117,11 +117,13 @@ export function registerPhotosTools(
         position: i + 1,
         ...(img.alt ? { alt: img.alt } : {}),
       }));
+      // Prefer listing.url over listing['@id'] (homes.com @id now has a
+      // #realestatelisting fragment). Strip #fragment and ?query before
+      // taking the last path segment.
+      const idSource = (listing.url ?? listing['@id'] ?? '')
+        .replace(/[?#].*$/, '');
       return textResult({
-        property_id:
-          listing['@id']?.split('/').filter(Boolean).pop() ??
-          listing.url?.split('/').filter(Boolean).pop() ??
-          '',
+        property_id: idSource.split('/').filter(Boolean).pop() ?? '',
         url: listing.url ?? listing['@id'] ?? '',
         count: photos.length,
         photos,

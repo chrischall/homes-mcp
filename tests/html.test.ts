@@ -12,6 +12,9 @@ import {
 } from '../src/html.js';
 
 describe('findTableByHeading + tableHeaderCells + tableRows', () => {
+  // Mirrors the real homes.com shape: `<th scope="row">` for the first
+  // cell of every data row (year/date column), `<td>` for the rest.
+  // Verified live 2026-05-26.
   const html = `
     <html><body>
       <section>
@@ -19,8 +22,8 @@ describe('findTableByHeading + tableHeaderCells + tableRows', () => {
         <table>
           <thead><tr><th>Year</th><th>Tax Paid</th><th>Assessment</th></tr></thead>
           <tbody>
-            <tr><td>2025</td><td>$2,714</td><td>$72,520</td></tr>
-            <tr><td>2024</td><td>$2,500</td><td>$70,000</td></tr>
+            <tr><th scope="row">2025</th><td>$2,714</td><td>$72,520</td></tr>
+            <tr><th scope="row">2024</th><td>$2,500</td><td>$70,000</td></tr>
           </tbody>
         </table>
       </section>
@@ -41,13 +44,13 @@ describe('findTableByHeading + tableHeaderCells + tableRows', () => {
     expect(findTableByHeading(root, 'Climate Risk')).toBeNull();
   });
 
-  it('reads header cells in document order', () => {
+  it('reads header cells from <thead> only — ignoring th cells inside tbody data rows', () => {
     const root = parseHtml(html);
     const t = findTableByHeading(root, 'Tax History')!;
     expect(tableHeaderCells(t)).toEqual(['Year', 'Tax Paid', 'Assessment']);
   });
 
-  it('reads tbody rows as trimmed string arrays', () => {
+  it('reads tbody rows including the leading <th scope="row"> cell', () => {
     const root = parseHtml(html);
     const t = findTableByHeading(root, 'Tax History')!;
     expect(tableRows(t)).toEqual([
@@ -103,6 +106,22 @@ describe('normalizeDate', () => {
   });
   it('returns only raw for unparseable input', () => {
     expect(normalizeDate('not a date')).toEqual({ raw: 'not a date' });
+  });
+
+  it('extracts the first MM/DD/YYYY when long+short dates appear side-by-side', () => {
+    // homes.com renders <span class="long-date">04/30/2026</span><span class="short-date">04/05/26</span>
+    // inside Property History cells; cell.text concatenates both.
+    expect(normalizeDate('04/30/2026 04/05/26')).toEqual({
+      iso: '2026-04-30',
+      raw: '04/30/2026 04/05/26',
+    });
+  });
+
+  it('falls back to MM/DD/YY when no MM/DD/YYYY is present', () => {
+    expect(normalizeDate(' 05/04/22 ')).toEqual({
+      iso: '2022-05-04',
+      raw: ' 05/04/22 ',
+    });
   });
 });
 
