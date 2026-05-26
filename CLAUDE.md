@@ -166,6 +166,8 @@ For every PR, apply exactly one label:
 | *(none / unmatched)*   | Other Changes            |
 | `ignore-for-release`   | Hidden from notes        |
 
+**Exception for first-party dependency bumps.** When bumping a package we own (currently `@fetchproxy/server` — anything published from a chrischall-owned repo), label the PR `enhancement` or `bug` instead of `dependencies`, and use the matching commit prefix (`feat:` or `fix:`) instead of `chore:`. Those bumps deliver real product fixes or features through us, so they should drive a release-please version bump and show up under Features/Bug Fixes in the release notes — not get hidden under "Dependencies" (which doesn't trigger a release).
+
 ### How PRs merge
 
 **Don't run `gh pr merge` yourself.** The automation does it:
