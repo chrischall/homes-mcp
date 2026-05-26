@@ -37,6 +37,115 @@ describe('buildSearchPath', () => {
   });
 });
 
+describe('buildSearchPath — extended filters', () => {
+  it('property_type=single_family → /houses-for-sale/', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', property_type: 'single_family' })
+    ).toBe('/atlanta-ga/houses-for-sale/');
+  });
+
+  it('property_type=condo → /condos-for-sale/', () => {
+    expect(
+      buildSearchPath({ location: 'Brooklyn, NY', property_type: 'condo' })
+    ).toBe('/brooklyn-ny/condos-for-sale/');
+  });
+
+  it('property_type=townhouse → /townhouses-for-sale/', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', property_type: 'townhouse' })
+    ).toBe('/atlanta-ga/townhouses-for-sale/');
+  });
+
+  it('property_type=land → /land-for-sale/', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', property_type: 'land' })
+    ).toBe('/atlanta-ga/land-for-sale/');
+  });
+
+  it('property_type=mobile → /mobile-homes-for-sale/', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', property_type: 'mobile' })
+    ).toBe('/atlanta-ga/mobile-homes-for-sale/');
+  });
+
+  it('property_type=multi_family → /multi-family-for-sale/', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', property_type: 'multi_family' })
+    ).toBe('/atlanta-ga/multi-family-for-sale/');
+  });
+
+  it('listing_type=sold → /<city>/sold/', () => {
+    expect(
+      buildSearchPath({ location: 'Brooklyn, NY', listing_type: 'sold' })
+    ).toBe('/brooklyn-ny/sold/');
+  });
+
+  it('listing_type=for_rent → /<city>/homes-for-rent/', () => {
+    expect(
+      buildSearchPath({ location: 'Brooklyn, NY', listing_type: 'for_rent' })
+    ).toBe('/brooklyn-ny/homes-for-rent/');
+  });
+
+  it('listing_type=open_houses → /<city>/open-houses/', () => {
+    expect(
+      buildSearchPath({ location: 'Brooklyn, NY', listing_type: 'open_houses' })
+    ).toBe('/brooklyn-ny/open-houses/');
+  });
+
+  it('listing_type=new_construction → /new-homes/for-sale/<city>/', () => {
+    expect(
+      buildSearchPath({ location: 'Brooklyn, NY', listing_type: 'new_construction' })
+    ).toBe('/new-homes/for-sale/brooklyn-ny/');
+  });
+
+  it('property_type + listing_type=for_rent composes (condo → /condos-for-rent/)', () => {
+    expect(
+      buildSearchPath({
+        location: 'Brooklyn, NY',
+        property_type: 'condo',
+        listing_type: 'for_rent',
+      })
+    ).toBe('/brooklyn-ny/condos-for-rent/');
+  });
+
+  it('single_family + for_rent → /<city>/houses-for-rent/', () => {
+    expect(
+      buildSearchPath({
+        location: 'Brooklyn, NY',
+        property_type: 'single_family',
+        listing_type: 'for_rent',
+      })
+    ).toBe('/brooklyn-ny/houses-for-rent/');
+  });
+
+  it('sort=newest appends /newest/', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', sort: 'newest' })
+    ).toBe('/atlanta-ga/newest/');
+  });
+
+  it('sort=newest with property_type composes', () => {
+    expect(
+      buildSearchPath({
+        location: 'Atlanta, GA',
+        property_type: 'condo',
+        sort: 'newest',
+      })
+    ).toBe('/atlanta-ga/condos-for-sale/newest/');
+  });
+
+  it('listing_type=new_construction ignores sort + property_type (different URL space)', () => {
+    expect(
+      buildSearchPath({
+        location: 'Brooklyn, NY',
+        listing_type: 'new_construction',
+        property_type: 'condo',
+        sort: 'newest',
+      })
+    ).toBe('/new-homes/for-sale/brooklyn-ny/');
+  });
+});
+
 describe('extractPropertyId', () => {
   it('extracts the last path segment from a homes.com property URL', () => {
     expect(

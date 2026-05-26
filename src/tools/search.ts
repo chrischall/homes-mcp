@@ -179,24 +179,102 @@ export function formatHome(item: JsonLdListingItem): FormattedHome | null {
   };
 }
 
+export type PropertyType =
+  | 'single_family'
+  | 'condo'
+  | 'townhouse'
+  | 'land'
+  | 'mobile'
+  | 'multi_family';
+
+export type ListingType =
+  | 'for_sale'
+  | 'sold'
+  | 'for_rent'
+  | 'open_houses'
+  | 'new_construction';
+
+export type SortOption = 'newest';
+
 export interface SearchInput {
   location: string;
   limit?: number;
+  property_type?: PropertyType;
+  listing_type?: ListingType;
+  sort?: SortOption;
 }
 
+const TYPE_TO_SLUG_SALE: Record<PropertyType, string> = {
+  single_family: 'houses',
+  condo: 'condos',
+  townhouse: 'townhouses',
+  land: 'land',
+  mobile: 'mobile-homes',
+  multi_family: 'multi-family',
+};
+
+const TYPE_TO_SLUG_RENT: Record<PropertyType, string> = {
+  single_family: 'houses',
+  condo: 'condos',
+  townhouse: 'townhouses',
+  land: 'land', // not a real homes.com rent path; falls back to /homes-for-rent/
+  mobile: 'mobile-homes', // same
+  multi_family: 'multi-family', // same
+};
+
 /**
- * Build the `/<location-slug>/` path for a search.
+ * Build the `/<location>/[<segment>/[<sort>/]]` path for a search.
  *
  * homes.com routes locations like `/atlanta-ga/`, `/brooklyn-ny/`,
- * `/30311/` (ZIPs). v0.1 doesn't compose URL-path filters — the
- * site's own canonical URL shape for filters is `?…` query-string
- * facets that change frequently, and we can't probe them safely
- * without driving real WAF challenges. So we hand the location off to
- * homes.com and let the user re-rank client-side.
+ * `/30311/` (ZIPs), with filter facets baked into the URL path:
+ *
+ *   /<city>/houses-for-sale/          property_type=single_family
+ *   /<city>/condos-for-sale/          property_type=condo
+ *   /<city>/townhouses-for-sale/      property_type=townhouse
+ *   /<city>/land-for-sale/            property_type=land
+ *   /<city>/mobile-homes-for-sale/    property_type=mobile
+ *   /<city>/multi-family-for-sale/    property_type=multi_family
+ *   /<city>/sold/                     listing_type=sold
+ *   /<city>/homes-for-rent/           listing_type=for_rent (untyped)
+ *   /<city>/condos-for-rent/          property_type=condo + listing_type=for_rent
+ *   /<city>/open-houses/              listing_type=open_houses
+ *   /new-homes/for-sale/<city>/       listing_type=new_construction
+ *   /<city>/<segment>/newest/         sort=newest (appended)
+ *
+ * Verified by inspecting homes.com nav links on /brooklyn-ny/ (2026-05-26).
+ * Path-based filters work; query-string filters are stripped at the edge.
  */
 export function buildSearchPath(input: SearchInput): string {
   const slug = locationToSlug(input.location);
-  return `/${slug}/`;
+
+  // new_construction has its own URL root; other params are ignored.
+  if (input.listing_type === 'new_construction') {
+    return `/new-homes/for-sale/${slug}/`;
+  }
+
+  let segment = '';
+  if (input.listing_type === 'sold') {
+    segment = 'sold';
+  } else if (input.listing_type === 'open_houses') {
+    segment = 'open-houses';
+  } else if (input.listing_type === 'for_rent') {
+    const typeSlug = input.property_type
+      ? TYPE_TO_SLUG_RENT[input.property_type]
+      : undefined;
+    const rentable = new Set(['houses', 'condos', 'townhouses']);
+    segment =
+      typeSlug && rentable.has(typeSlug) ? `${typeSlug}-for-rent` : 'homes-for-rent';
+  } else if (input.property_type) {
+    // listing_type undefined or 'for_sale'
+    segment = `${TYPE_TO_SLUG_SALE[input.property_type]}-for-sale`;
+  }
+
+  const sort = input.sort === 'newest' ? 'newest' : '';
+
+  const parts: string[] = [slug];
+  if (segment) parts.push(segment);
+  if (sort) parts.push(sort);
+  return `/${parts.join('/')}/`;
 }
 
 interface CollectionPageMainEntity {
@@ -234,7 +312,7 @@ export function registerSearchTools(
     {
       title: 'Search homes.com listings',
       description:
-        "Search homes.com listings by free-text location (city, ZIP, neighborhood). Slugifies the input into homes.com's URL routing (e.g. 'Atlanta, GA' → /atlanta-ga/, '94110' → /94110/) and fetches the SSR search page. Parses the embedded Schema.org JSON-LD to return each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage, and the homes.com property URL. v0.1 does not encode price/bed/home-type filters into the URL — pass the location and re-rank the results client-side. Read-only; safe to call repeatedly.",
+        "Search homes.com listings by free-text location (city, ZIP, neighborhood). Optionally filter by property_type (single_family/condo/townhouse/land/mobile/multi_family), listing_type (for_sale/sold/for_rent/open_houses/new_construction), and sort (newest). Slugifies the location into homes.com's URL routing (e.g. 'Atlanta, GA' + condo + for_sale → /atlanta-ga/condos-for-sale/). Parses the embedded Schema.org JSON-LD to return each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage, and the homes.com property URL. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Search homes.com listings',
         readOnlyHint: true,
@@ -253,6 +331,29 @@ export function registerSearchTools(
           .positive()
           .optional()
           .describe('Max listings to return (default 40, the search-page size).'),
+        property_type: z
+          .enum([
+            'single_family',
+            'condo',
+            'townhouse',
+            'land',
+            'mobile',
+            'multi_family',
+          ])
+          .optional()
+          .describe(
+            'Restrict to a specific homes.com property type. Composes with listing_type.'
+          ),
+        listing_type: z
+          .enum(['for_sale', 'sold', 'for_rent', 'open_houses', 'new_construction'])
+          .optional()
+          .describe(
+            'Search axis. Defaults to for_sale. "sold" returns recently-sold listings (useful for market context). "for_rent" returns rentals. "open_houses" returns listings with scheduled open houses. "new_construction" returns builder listings under /new-homes/.'
+          ),
+        sort: z
+          .enum(['newest'])
+          .optional()
+          .describe('Sort order. Only "newest" is currently supported.'),
       },
     },
     async (input) => {
