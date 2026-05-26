@@ -1,0 +1,232 @@
+import { z } from 'zod';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { HomesClient } from '../client.js';
+import { textResult } from '../mcp.js';
+import {
+  parseHtml,
+  findTableByHeading,
+  tableRows,
+  normalizeDate,
+  parseDollar,
+  parsePercent,
+  type HTMLElement,
+} from '../html.js';
+import { urlToPath } from '../url.js';
+import { extractJsonLd, findGraphNode } from '../page-state.js';
+
+/**
+ * homes.com detail pages render four parallel history tables:
+ *
+ *   - "Property History"  — listings, price changes, sales, off-market
+ *                            (MM/DD/YYYY dates)
+ *   - "Purchase History"  — deeds (MM/DD/YY dates)
+ *   - "Mortgage History"  — liens (MM/DD/YY dates)
+ *   - "Tax History"       — year-by-year tax assessments
+ *
+ * Three of those (property/purchase/mortgage) are collapsed into one
+ * tool here for ergonomics — a single call gives the full timeline that
+ * a user sees on the page. Tax history is its own tool because the
+ * row shape and use cases differ.
+ */
+
+export interface ListingEvent {
+  date: string;
+  date_raw?: string;
+  event: string;
+  price?: number;
+  list_to_sale_pct?: number;
+  price_per_sqft?: number;
+}
+
+export interface OwnershipEvent {
+  date: string;
+  date_raw?: string;
+  deed_type?: string;
+  sale_price?: number;
+  title_company?: string;
+}
+
+export interface LienEvent {
+  date: string;
+  date_raw?: string;
+  status?: string;
+  loan_amount?: number;
+  loan_type?: string;
+}
+
+function withDate<T extends { date: string; date_raw?: string }>(
+  base: Omit<T, 'date' | 'date_raw'>,
+  rawDate: string
+): T {
+  const n = normalizeDate(rawDate);
+  const out = { ...base, date: n.iso ?? n.raw } as T;
+  if (!n.iso) out.date_raw = n.raw;
+  return out;
+}
+
+export function parsePropertyHistory(root: HTMLElement): ListingEvent[] {
+  const t = findTableByHeading(root, 'Property History');
+  if (!t) return [];
+  return tableRows(t)
+    .filter((cells) => cells.length >= 2)
+    .map((cells) => {
+      const [date, event, price, listToSale, ppsf] = cells;
+      const base: Omit<ListingEvent, 'date' | 'date_raw'> = {
+        event: (event ?? '').trim(),
+      };
+      if (price !== undefined) {
+        const n = parseDollar(price);
+        if (n !== undefined) base.price = n;
+      }
+      if (listToSale !== undefined) {
+        const n = parsePercent(listToSale);
+        if (n !== undefined) base.list_to_sale_pct = n;
+      }
+      if (ppsf !== undefined) {
+        const n = parseDollar(ppsf);
+        if (n !== undefined) base.price_per_sqft = n;
+      }
+      return withDate<ListingEvent>(base, date ?? '');
+    });
+}
+
+export function parseOwnershipHistory(root: HTMLElement): OwnershipEvent[] {
+  const t = findTableByHeading(root, 'Purchase History');
+  if (!t) return [];
+  return tableRows(t)
+    .filter((cells) => cells.length >= 2)
+    .map((cells) => {
+      const [date, deedType, salePrice, titleCo] = cells;
+      const base: Omit<OwnershipEvent, 'date' | 'date_raw'> = {};
+      if (deedType) base.deed_type = deedType.trim();
+      if (salePrice !== undefined) {
+        const n = parseDollar(salePrice);
+        if (n !== undefined) base.sale_price = n;
+      }
+      if (titleCo && titleCo.trim() !== '--' && titleCo.trim() !== '') {
+        base.title_company = titleCo.trim();
+      }
+      return withDate<OwnershipEvent>(base, date ?? '');
+    });
+}
+
+export function parseLienHistory(root: HTMLElement): LienEvent[] {
+  const t = findTableByHeading(root, 'Mortgage History');
+  if (!t) return [];
+  return tableRows(t)
+    .filter((cells) => cells.length >= 2)
+    .map((cells) => {
+      const [date, status, loanAmt, loanType] = cells;
+      const base: Omit<LienEvent, 'date' | 'date_raw'> = {};
+      if (status) base.status = status.trim();
+      if (loanAmt !== undefined) {
+        const n = parseDollar(loanAmt);
+        if (n !== undefined) base.loan_amount = n;
+      }
+      if (loanType) base.loan_type = loanType.trim();
+      return withDate<LienEvent>(base, date ?? '');
+    });
+}
+
+export interface TaxRecord {
+  year: number;
+  tax_paid?: number;
+  assessment_total?: number;
+  assessment_land?: number;
+  assessment_improvement?: number;
+}
+
+export function parseTaxHistory(root: HTMLElement): TaxRecord[] {
+  const t = findTableByHeading(root, 'Tax History');
+  if (!t) return [];
+  return tableRows(t)
+    .filter((cells) => cells.length >= 2)
+    .map((cells) => {
+      const [yearRaw, paid, assess, land, improvement] = cells;
+      const year = Number((yearRaw ?? '').trim());
+      const rec: TaxRecord = { year: Number.isFinite(year) ? year : 0 };
+      const p = paid !== undefined ? parseDollar(paid) : undefined;
+      if (p !== undefined) rec.tax_paid = p;
+      const a = assess !== undefined ? parseDollar(assess) : undefined;
+      if (a !== undefined) rec.assessment_total = a;
+      const l = land !== undefined ? parseDollar(land) : undefined;
+      if (l !== undefined) rec.assessment_land = l;
+      const i = improvement !== undefined ? parseDollar(improvement) : undefined;
+      if (i !== undefined) rec.assessment_improvement = i;
+      return rec;
+    })
+    .filter((rec) => rec.year > 0);
+}
+
+function extractPropertyIdFromHtml(html: string, fallbackUrl: string): string {
+  const doc = extractJsonLd(html);
+  const node = findGraphNode(doc, 'RealEstateListing') as
+    | { '@id'?: string; url?: string }
+    | null;
+  const src = node?.['@id'] ?? node?.url ?? fallbackUrl;
+  const segments = src.replace(/^https?:\/\/[^/]+/, '').split('/').filter(Boolean);
+  return segments[segments.length - 1] ?? '';
+}
+
+export function registerHistoryTools(
+  server: McpServer,
+  client: HomesClient
+): void {
+  server.registerTool(
+    'homes_get_property_history',
+    {
+      title: 'Get homes.com property history (listings + ownership + liens)',
+      description:
+        "Three timelines for a homes.com property in one call: `listing_events` (listings, price changes, sales, off-market), `ownership_events` (deeds — recorded sales between owners), and `lien_events` (mortgage/refi origination + payoff). Pass `url` — the full property detail URL. Each event has an ISO 8601 date plus event-specific fields. Series are `[]` when the listing doesn't carry that section (common for new construction). Read-only; safe to call repeatedly.",
+      annotations: {
+        title: 'Get homes.com property history (listings + ownership + liens)',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        url: z.string().describe('homes.com property detail URL or path.'),
+      },
+    },
+    async ({ url }) => {
+      const path = urlToPath(url);
+      const html = await client.fetchHtml(path);
+      const root = parseHtml(html);
+      return textResult({
+        property_id: extractPropertyIdFromHtml(html, url),
+        url,
+        listing_events: parsePropertyHistory(root),
+        ownership_events: parseOwnershipHistory(root),
+        lien_events: parseLienHistory(root),
+      });
+    }
+  );
+
+  server.registerTool(
+    'homes_get_tax_history',
+    {
+      title: 'Get homes.com property tax history',
+      description:
+        "Year-by-year property-tax records for a homes.com property: tax paid, total assessed value, and the land/improvement split. Pass `url` — the full property detail URL. Returns `{ property_id, url, records: [{ year, tax_paid?, assessment_total?, assessment_land?, assessment_improvement? }] }`. Useful for spotting reassessment jumps or comparing tax burdens across properties. Read-only; safe to call repeatedly.",
+      annotations: {
+        title: 'Get homes.com property tax history',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        url: z.string().describe('homes.com property detail URL or path.'),
+      },
+    },
+    async ({ url }) => {
+      const path = urlToPath(url);
+      const html = await client.fetchHtml(path);
+      const root = parseHtml(html);
+      return textResult({
+        property_id: extractPropertyIdFromHtml(html, url),
+        url,
+        records: parseTaxHistory(root),
+      });
+    }
+  );
+}

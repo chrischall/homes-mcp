@@ -23,6 +23,11 @@ import { registerCompareTools } from './tools/compare.js';
 import { registerAffordabilityTools } from './tools/affordability.js';
 import { registerPhotosTools } from './tools/photos.js';
 import { registerHealthcheckTools } from './tools/healthcheck.js';
+import { registerHistoryTools } from './tools/history.js';
+import { registerNearbyTools } from './tools/nearby.js';
+import { registerMarketTools } from './tools/market.js';
+import { registerSavedTools } from './tools/saved.js';
+import { registerRentVsBuyTools } from './tools/rent-vs-buy.js';
 
 const VERSION = '0.6.0'; // x-release-please-version
 
@@ -44,6 +49,11 @@ registerCompareTools(server, client);
 registerAffordabilityTools(server);
 registerPhotosTools(server, client);
 registerHealthcheckTools(server, client);
+registerHistoryTools(server, client);
+registerNearbyTools(server, client);
+registerMarketTools(server, client);
+registerSavedTools(server, client);
+registerRentVsBuyTools(server);
 
 console.error(
   `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port ?? 37149}. ` +
