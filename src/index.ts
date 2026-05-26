@@ -29,7 +29,7 @@ import { registerMarketTools } from './tools/market.js';
 import { registerSavedTools } from './tools/saved.js';
 import { registerRentVsBuyTools } from './tools/rent-vs-buy.js';
 
-const VERSION = '0.6.0'; // x-release-please-version
+const VERSION = '0.7.0'; // x-release-please-version
 
 const port = process.env.HOMES_WS_PORT
   ? Number(process.env.HOMES_WS_PORT)
