@@ -42,18 +42,35 @@ export function findTableByHeading(
   return null;
 }
 
-/** Trimmed text of every <th> in a table (header row), in document order. */
+/**
+ * Trimmed text of every <th> in a table's header row, in document order.
+ *
+ * Scoped to `<thead>` when present, otherwise falls back to all `<th>`
+ * in the table. This matters because homes.com's tables use
+ * `<th scope="row">` for the first cell of every data row (the year /
+ * date column) — those should NOT be confused with column headers.
+ */
 export function tableHeaderCells(table: HTMLElement): string[] {
-  return table.querySelectorAll('th').map((th) => th.text.replace(/\s+/g, ' ').trim());
+  const thead = table.querySelector('thead');
+  const scope = thead ?? table;
+  return scope.querySelectorAll('th').map((th) => th.text.replace(/\s+/g, ' ').trim());
 }
 
-/** Each <tbody> row as a string[] of trimmed <td> text. Skips rows with no <td>. */
+/**
+ * Each <tbody> row as a string[] of trimmed cell text, in document order.
+ * Collects both `<th>` and `<td>` because homes.com uses `<th scope="row">`
+ * for the leading cell of every data row (year / date column) — dropping
+ * those would silently shift every column left by one and corrupt every
+ * parsed record.
+ */
 export function tableRows(table: HTMLElement): string[][] {
   const tbody = table.querySelector('tbody') ?? table;
   return tbody
     .querySelectorAll('tr')
     .map((tr) =>
-      tr.querySelectorAll('td').map((td) => td.text.replace(/\s+/g, ' ').trim())
+      tr
+        .querySelectorAll('th, td')
+        .map((cell) => cell.text.replace(/\s+/g, ' ').trim())
     )
     .filter((cells) => cells.length > 0);
 }
@@ -90,17 +107,25 @@ export function findLinksUnderHeading(
  * Normalize a homes.com date to ISO 8601 `YYYY-MM-DD`. Always returns
  * `raw`; adds `iso` when parse succeeds.
  *
- * Accepted: "MM/DD/YYYY", "MM/DD/YY" (50-year window: 00–49 → 20xx,
- * 50–99 → 19xx), bare "YYYY" (→ Jan 1).
+ * Accepts:
+ *   - "MM/DD/YYYY"
+ *   - "MM/DD/YY" (50-year window: 00–49 → 20xx, 50–99 → 19xx)
+ *   - bare "YYYY" (→ Jan 1)
+ *
+ * Tolerates extra content around the date, because real homes.com cells
+ * often contain BOTH a long-date span and a short-date span side-by-side
+ * (e.g. `04/30/2026 04/05/26`). We prefer the 4-digit-year form when
+ * present, fall back to the 2-digit form, and only bare-year as a last
+ * resort.
  */
 export function normalizeDate(raw: string): { iso?: string; raw: string } {
   const trimmed = raw.trim();
-  let m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  let m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(trimmed);
   if (m) {
     const [, mm, dd, yyyy] = m;
     return { raw, iso: `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}` };
   }
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.exec(trimmed);
+  m = /(\d{1,2})\/(\d{1,2})\/(\d{2})\b/.exec(trimmed);
   if (m) {
     const [, mm, dd, yy] = m;
     const n = Number(yy);
