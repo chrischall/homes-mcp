@@ -9,8 +9,13 @@ export function parseHtml(html: string): HTMLElement {
 
 /**
  * Find the first <h1>/<h2>/<h3>/<h4> whose text contains `heading`
- * (case-insensitive), then return the nearest following <table>. Looks
- * at the heading's containing section first, then forward siblings.
+ * (case-insensitive), then return the nearest following <table>.
+ *
+ * Strategy: walk forward through the heading's siblings, stopping at
+ * the next heading. If nothing's found and the heading lives in a
+ * dedicated wrapper (<section>/<article>/<aside>), look inside that
+ * wrapper (but not the broader parent — peer headings might own peer
+ * tables).
  */
 export function findTableByHeading(
   root: HTMLElement,
@@ -20,11 +25,6 @@ export function findTableByHeading(
   const headings = root.querySelectorAll('h1, h2, h3, h4');
   for (const h of headings) {
     if (!h.text.toLowerCase().includes(needle)) continue;
-    // 1. Search inside the heading's parent for a table.
-    const parent = h.parentNode as HTMLElement | null;
-    const inside = parent?.querySelector('table');
-    if (inside) return inside;
-    // 2. Walk forward siblings until a table or the next heading.
     let cur: HTMLElement | null = h.nextElementSibling as HTMLElement | null;
     while (cur) {
       if (/^H[1-4]$/.test(cur.tagName)) break;
@@ -32,6 +32,11 @@ export function findTableByHeading(
       const nested = cur.querySelector('table');
       if (nested) return nested;
       cur = cur.nextElementSibling as HTMLElement | null;
+    }
+    const parent = h.parentNode as HTMLElement | null;
+    if (parent && /^(SECTION|ARTICLE|ASIDE)$/.test(parent.tagName)) {
+      const inside = parent.querySelector('table');
+      if (inside) return inside;
     }
   }
   return null;
