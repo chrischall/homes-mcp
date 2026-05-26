@@ -171,6 +171,26 @@ describe('extractPropertyId', () => {
     ).toBe('abc123');
   });
 
+  it('strips #realestatelisting fragments (homes.com SSR includes them in @id)', () => {
+    // Verified live 2026-05-26: homes.com JSON-LD now emits
+    //   "@id": "https://www.homes.com/property/x/abc123/#realestatelisting"
+    // Without stripping #fragment we'd return "#realestatelisting".
+    expect(
+      extractPropertyId({
+        '@id': 'https://www.homes.com/property/x/abc123/#realestatelisting',
+      })
+    ).toBe('abc123');
+  });
+
+  it('prefers url over @id when both are present (url is fragment-free)', () => {
+    expect(
+      extractPropertyId({
+        '@id': 'https://www.homes.com/property/x/abc123/#realestatelisting',
+        url: 'https://www.homes.com/property/x/abc123/',
+      })
+    ).toBe('abc123');
+  });
+
   it('returns "" when neither url nor @id is present', () => {
     expect(extractPropertyId({})).toBe('');
   });

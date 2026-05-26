@@ -105,7 +105,9 @@ function originPropertyId(html: string, fallbackUrl: string): string {
   const node = findGraphNode(doc, 'RealEstateListing') as
     | { '@id'?: string; url?: string }
     | null;
-  const src = node?.['@id'] ?? node?.url ?? fallbackUrl;
+  // Prefer node.url over node['@id'] — see properties.ts:extractPropertyId
+  // (homes.com @id now carries a `#realestatelisting` fragment).
+  const src = node?.url ?? node?.['@id'] ?? fallbackUrl;
   return propertyIdFromUrl(src);
 }
 
