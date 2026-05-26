@@ -26,6 +26,7 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_get_saved_homes` | `tools/saved.ts` | `GET /customer/dashboard/favorites/` — auth-gated DOM scrape | read (auth) |
 | `homes_get_saved_searches` | `tools/saved.ts` | `GET /customer/dashboard/saved-searches/` — auth-gated DOM scrape | read (auth) |
 | `homes_estimate_rent_vs_buy` | `tools/rent-vs-buy.ts` | (local; no network) | read |
+| `homes_get_by_address` | `tools/by-address.ts` | `GET /<address-slug>/` SSR — pick first `CollectionPage.mainEntity.itemListElement[0]` (or single `RealEstateListing` if homes.com redirects to detail). Returns `{ resolved: false, error }` on miss. | read |
 
 ## Architecture
 
@@ -63,6 +64,10 @@ src/
     saved.ts            # homes_get_saved_homes + homes_get_saved_searches
                         #   (auth-gated /customer/dashboard/* scrape)
     rent-vs-buy.ts      # homes_estimate_rent_vs_buy (local; no network)
+    by-address.ts       # homes_get_by_address (slugify address parts,
+                        #   fetch /<slug>/, take first listing or single
+                        #   RealEstateListing; graceful { resolved: false }
+                        #   on miss/error for unified canonical-URL caller)
 
 tests/                  # 1:1 mirror of src/, plus tests/helpers.ts harness.
                         #   All tests mock HomesClient.fetchHtml.
