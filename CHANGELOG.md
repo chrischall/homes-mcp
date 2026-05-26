@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/chrischall/homes-mcp/compare/v0.7.0...v0.8.0) (2026-05-26)
+
+
+### Features
+
+* add homes_get_by_address for unified canonical-URL resolution ([#11](https://github.com/chrischall/homes-mcp/issues/11)) ([219b582](https://github.com/chrischall/homes-mcp/commit/219b5828cfcd90f3755d8a9d9feb4d4ac3cba6c9)), closes [#10](https://github.com/chrischall/homes-mcp/issues/10)
+
 ## [0.7.0](https://github.com/chrischall/homes-mcp/compare/v0.6.0...v0.7.0) (2026-05-26)
 
 
