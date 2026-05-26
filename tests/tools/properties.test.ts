@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import type { HomesClient } from '../../src/client.js';
 import {
   buildPath,
@@ -247,5 +250,148 @@ describe('homes_get_property tool', () => {
     expect(r.isError).toBeTruthy();
     const text = (r.content[0] as { text: string }).text;
     expect(text).toMatch(/No RealEstateListing/);
+  });
+});
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const RICH_FIXTURE = readFileSync(
+  resolve(__dirname, '../fixtures/property-detail-rich.html'),
+  'utf8'
+);
+
+describe('homes_get_property — richer fields', () => {
+  let h: Awaited<ReturnType<typeof createTestHarness>>;
+  const fetch = vi.fn();
+  const c = { fetchHtml: fetch } as unknown as HomesClient;
+
+  beforeAll(async () => {
+    h = await createTestHarness((s) => registerPropertyTools(s, c));
+  });
+  afterAll(async () => h?.close());
+
+  it('returns description from JSON-LD', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const r = await h.callTool('homes_get_property', {
+      url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+    });
+    const p = parseToolResult<any>(r);
+    expect(p.description).toContain('Charming bungalow');
+  });
+
+  it('extracts highlights bullets from the Highlights section', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.highlights).toEqual([
+      'Ranch Style House',
+      'In-Law or Guest Suite',
+      'Central Air',
+      'No HOA',
+    ]);
+  });
+
+  it('extracts estimated_monthly_payment and total_views', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.estimated_monthly_payment).toBe(1994);
+    expect(p.total_views).toBe(87346);
+  });
+
+  it('extracts matterport_url', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.matterport_url).toContain('matterport.com');
+  });
+
+  it('extracts floorplan_urls', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.floorplan_urls).toHaveLength(2);
+    expect(p.floorplan_urls[0]).toContain('floorplan');
+  });
+
+  it('extracts schools', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.schools).toHaveLength(3);
+    expect(p.schools[0].name).toContain('Cascade Elementary');
+  });
+
+  it('extracts mls_id and mls_source from the Listing and Financial Details section', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.mls_id).toBe('7654321');
+    expect(p.mls_source).toBe('FMLS');
+  });
+
+  it('extracts hoa_fee (0 when "No HOA")', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.hoa_fee).toBe(0);
+  });
+
+  it('extracts lot size and parking', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.lot_size_sqft).toBe(10890);
+    expect(p.lot_size_acres).toBeCloseTo(0.25, 2);
+    expect(p.parking).toContain('2-car garage');
+  });
+
+  it('extracts heating and cooling', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.heating).toContain('Forced Air');
+    expect(p.cooling).toContain('Central Air');
+  });
+
+  it('preserves existing fields (address, lat, price, beds, baths, year_built)', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.address).toBe('123 Test St');
+    expect(p.lat).toBeCloseTo(33.74, 2);
+    expect(p.price).toBe(425000);
+    expect(p.beds).toBe(4);
+    expect(p.baths).toBe(3);
+    expect(p.year_built).toBe(1955);
   });
 });

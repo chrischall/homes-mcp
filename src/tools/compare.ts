@@ -99,8 +99,8 @@ export function registerCompareTools(
       const rows: CompareRow[] = await Promise.all(
         ts.map(async (t) => {
           try {
-            const { listing } = await fetchListingRecord(client, t);
-            const formatted = format(listing);
+            const { listing, html } = await fetchListingRecord(client, t);
+            const formatted = format(listing, html);
             return {
               property_id: formatted.property_id,
               url: formatted.url,
