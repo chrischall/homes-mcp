@@ -7,6 +7,7 @@ import {
   parsePropertyHistory,
   parseOwnershipHistory,
   parseLienHistory,
+  parseTaxHistory,
   registerHistoryTools,
 } from '../../src/tools/history.js';
 import { parseHtml } from '../../src/html.js';
@@ -15,6 +16,7 @@ import { createTestHarness, parseToolResult } from '../helpers.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FULL = readFileSync(resolve(__dirname, '../fixtures/history-full.html'), 'utf8');
 const EMPTY = readFileSync(resolve(__dirname, '../fixtures/history-empty.html'), 'utf8');
+const TAX = readFileSync(resolve(__dirname, '../fixtures/tax-history.html'), 'utf8');
 
 describe('parsePropertyHistory', () => {
   it('parses listing events with normalized dates and numeric fields', () => {
@@ -102,5 +104,49 @@ describe('homes_get_property_history tool', () => {
     expect(p.listing_events).toEqual([]);
     expect(p.ownership_events).toEqual([]);
     expect(p.lien_events).toEqual([]);
+  });
+});
+
+describe('parseTaxHistory', () => {
+  it('parses every row with numeric fields', () => {
+    const root = parseHtml(TAX);
+    const events = parseTaxHistory(root);
+    expect(events).toHaveLength(3);
+    expect(events[0]).toEqual({
+      year: 2025,
+      tax_paid: 2714,
+      assessment_total: 72520,
+      assessment_land: 20200,
+      assessment_improvement: 52320,
+    });
+    expect(events[2].tax_paid).toBeUndefined();
+    expect(events[2].assessment_total).toBe(65000);
+  });
+
+  it('returns [] when no Tax History section', () => {
+    const root = parseHtml(EMPTY);
+    expect(parseTaxHistory(root)).toEqual([]);
+  });
+});
+
+describe('homes_get_tax_history tool', () => {
+  let h2: Awaited<ReturnType<typeof createTestHarness>>;
+  const fetch2 = vi.fn();
+  const c2 = { fetchHtml: fetch2 } as unknown as HomesClient;
+
+  beforeAll(async () => {
+    h2 = await createTestHarness((s) => registerHistoryTools(s, c2));
+  });
+  afterAll(async () => h2?.close());
+
+  it('returns parsed tax records', async () => {
+    fetch2.mockResolvedValueOnce(TAX);
+    const p = parseToolResult<any>(
+      await h2.callTool('homes_get_tax_history', {
+        url: 'https://www.homes.com/property/x/abc123/',
+      })
+    );
+    expect(p.records).toHaveLength(3);
+    expect(p.records[0].year).toBe(2025);
   });
 });
