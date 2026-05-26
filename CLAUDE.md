@@ -19,6 +19,13 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_calculate_mortgage` | `tools/mortgage.ts` | (local; no network) | read |
 | `homes_calculate_affordability` | `tools/affordability.ts` | (local; no network) | read |
 | `homes_healthcheck` | `tools/healthcheck.ts` | `/robots.txt` round-trip + bridge diagnostics | read |
+| `homes_get_property_history` | `tools/history.ts` | Same SSR detail page — parse Property/Purchase/Mortgage History tables | read |
+| `homes_get_tax_history` | `tools/history.ts` | Same SSR detail page — parse Tax History table | read |
+| `homes_get_nearby_listings` | `tools/nearby.ts` | Same SSR detail page — scrape "Homes for Sale Near" link cards | read |
+| `homes_get_market_report` | `tools/market.ts` | `GET /<city-slug>/sold/` — derive median/avg from JSON-LD itemListElement | read |
+| `homes_get_saved_homes` | `tools/saved.ts` | `GET /customer/dashboard/favorites/` — auth-gated DOM scrape | read (auth) |
+| `homes_get_saved_searches` | `tools/saved.ts` | `GET /customer/dashboard/saved-searches/` — auth-gated DOM scrape | read (auth) |
+| `homes_estimate_rent_vs_buy` | `tools/rent-vs-buy.ts` | (local; no network) | read |
 
 ## Architecture
 
@@ -33,14 +40,29 @@ src/
   page-state.ts         # extractJsonLd + findGraphNode helpers
   url.ts                # urlToPath + locationToSlug
   mcp.ts                # textResult() result-wrapper
+  html.ts               # shared HTML scraping helpers built on
+                        #   node-html-parser (findTableByHeading,
+                        #   tableRows, findLinksUnderHeading,
+                        #   normalizeDate/Dollar/Percent/IntegerLoose).
   tools/
-    search.ts           # homes_search_properties (buildSearchPath + formatHome)
-    properties.ts       # homes_get_property (fetchListingRecord + format)
+    search.ts           # homes_search_properties (buildSearchPath +
+                        #   path-based property_type/listing_type/sort)
+    properties.ts       # homes_get_property (JSON-LD + DOM-side scrape:
+                        #   description, highlights, schools, HOA, MLS, …)
     photos.ts           # homes_get_property_photos (<img> scrape, CDN-filtered)
     compare.ts          # homes_compare_properties (concurrent get_property)
     mortgage.ts         # homes_calculate_mortgage (local PITI)
     affordability.ts    # homes_calculate_affordability (local DTI math)
     healthcheck.ts      # homes_healthcheck (round-trips /robots.txt)
+    history.ts          # homes_get_property_history + homes_get_tax_history
+                        #   (scrape Property/Purchase/Mortgage/Tax tables)
+    nearby.ts           # homes_get_nearby_listings (scrape "Homes for
+                        #   Sale Near" link cards on detail page)
+    market.ts           # homes_get_market_report (fetch /<slug>/sold/,
+                        #   median + $/sqft from JSON-LD itemListElement)
+    saved.ts            # homes_get_saved_homes + homes_get_saved_searches
+                        #   (auth-gated /customer/dashboard/* scrape)
+    rent-vs-buy.ts      # homes_estimate_rent_vs_buy (local; no network)
 
 tests/                  # 1:1 mirror of src/, plus tests/helpers.ts harness.
                         #   All tests mock HomesClient.fetchHtml.
@@ -86,7 +108,9 @@ HOMES_WS_PORT=37149   # override the fetchproxy WebSocket port
 - **Search vs. detail shape.** Search pages put the listings in `CollectionPage.mainEntity.itemListElement[]`; each item is tagged `[RealEstateListing, Product]` with a nested `mainEntity` carrying address/size. Search items LACK `geo` — lat/lng appears only on the property detail page. Detail pages emit a single `[RealEstateListing, Product]` graph node with `datePosted`, `dateModified`, `mainEntity.geo`, `mainEntity.yearBuilt`, and `offers.offeredBy[]` (the listing agent).
 - **Property URL shape.** Detail URLs look like `https://www.homes.com/property/<address-slug>/<propertyId>/`, where `<propertyId>` is a base36-ish token (e.g. `rxrzwg0kjnr32`). We treat the last non-empty path segment as the stable identifier.
 - **Photos are DOM-only.** The JSON-LD only carries one primary image (plus `primaryImageOfPage`). The real gallery lives in `<img>` tags on the detail page — `tools/photos.ts` scrapes those and filters to URLs containing `homes.com` (the CDN host).
-- **No price-history, saved-listings, or market-report surface.** These are auth-gated or unavailable in the SSR HTML, so v0.1 ships without them entirely (tools deleted, not stubbed).
+- **Path-based search filters.** homes.com routes filter facets through URL paths, not query strings — `?bed_min=2` is dropped at the edge. Supported paths verified live 2026-05-26: `/<city>/houses-for-sale/`, `/condos-for-sale/`, `/townhouses-for-sale/`, `/land-for-sale/`, `/mobile-homes-for-sale/`, `/multi-family-for-sale/`, `/sold/`, `/homes-for-rent/`, `/<type>-for-rent/`, `/open-houses/`, `/newest/`, and `/new-homes/for-sale/<city>/`. `homes_search_properties` composes these via `property_type`, `listing_type`, `sort`.
+- **History + tax data are in HTML tables, not JSON-LD.** Every property detail page server-renders four tables — Property History, Purchase History, Mortgage History, Tax History — whose row schemas are stable but lack semantic markup. `src/tools/history.ts` reads them via `findTableByHeading` from `src/html.ts` (built on `node-html-parser`). Date formats are mixed: Property History uses `MM/DD/YYYY`; Purchase + Mortgage use `MM/DD/YY` (50-year window). All dates are normalized to ISO 8601 in tool output.
+- **Saved homes + saved searches are auth-only.** `/customer/dashboard/favorites/` and `/customer/dashboard/saved-searches/` work from a signed-in tab and return populated HTML; not signed in → `SessionNotAuthenticatedError` (already handled by `throwIfSignInPage`).
 - **Sign-in detection.** `src/client.ts::throwIfSignInPage` flags `/sign-in` URL redirects and the AWS WAF challenge interstitial (body matches both `awswaf.com` AND `challenge.js` AND body < 80 KB). CoStar (homes.com's parent) sits behind AWS WAF.
 
 ## Publishing constraints
