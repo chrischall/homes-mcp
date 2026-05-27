@@ -248,11 +248,11 @@ export function registerHistoryTools(
   server.registerTool(
     'homes_get_property_history',
     {
-      title: 'Get homes.com property history (listings + ownership + liens)',
+      title: 'Get homes.com property history (DEPRECATED — use homes_get_history)',
       description:
-        "Three timelines for a homes.com property in one call: `listing_events` (listings, price changes, sales, off-market), `ownership_events` (deeds — recorded sales between owners), and `lien_events` (mortgage/refi origination + payoff). Also returns `events_normalized` — `listing_events` mapped onto the cross-MCP event-type enum (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted) so callers can analyse timelines without re-implementing per-source normalizers. Pass `url` — the full property detail URL. Each event has an ISO 8601 date plus event-specific fields. Series are `[]` when the listing doesn't carry that section (common for new construction). Read-only; safe to call repeatedly.",
+        "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_price_history: true })`. Same data, fewer round trips. Will be removed in a future major version. Three timelines for a homes.com property in one call: `listing_events`, `ownership_events`, `lien_events`. Also returns `events_normalized` mapped onto the cross-MCP enum.",
       annotations: {
-        title: 'Get homes.com property history (listings + ownership + liens)',
+        title: 'Get homes.com property history (DEPRECATED — use homes_get_history)',
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
@@ -280,11 +280,11 @@ export function registerHistoryTools(
   server.registerTool(
     'homes_get_tax_history',
     {
-      title: 'Get homes.com property tax history',
+      title: 'Get homes.com property tax history (DEPRECATED — use homes_get_history)',
       description:
-        "Year-by-year property-tax records for a homes.com property: tax paid, total assessed value, and the land/improvement split. Pass `url` — the full property detail URL. Returns `{ property_id, url, records: [{ year, tax_paid?, assessment_total?, assessment_land?, assessment_improvement? }] }`. Useful for spotting reassessment jumps or comparing tax burdens across properties. Read-only; safe to call repeatedly.",
+        "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_tax_history: true })`. Same data, fewer round trips; note that `homes_get_history` returns the tax array as `tax_records` (not `records`). Will be removed in a future major version. Year-by-year property-tax records: tax paid, total assessed value, land/improvement split.",
       annotations: {
-        title: 'Get homes.com property tax history',
+        title: 'Get homes.com property tax history (DEPRECATED — use homes_get_history)',
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
@@ -301,6 +301,42 @@ export function registerHistoryTools(
         property_id: extractPropertyIdFromHtml(html, url),
         url,
         records: parseTaxHistory(root),
+      });
+    }
+  );
+
+  // #31: combined endpoint that returns BOTH price + tax history. Same
+  // fetch as either split tool — preferred over the split surface
+  // (which is now marked DEPRECATED in its tool descriptions).
+  server.registerTool(
+    'homes_get_history',
+    {
+      title: 'Get homes.com property + tax history (combined)',
+      description:
+        "Combined history endpoint — replaces `homes_get_property_history` + `homes_get_tax_history` with a single fetch. Returns `{ property_id, url, listing_events, ownership_events, lien_events, events_normalized, tax_records }`. Pass `url` — the full property detail URL. Series are `[]` when the listing doesn't carry that section. Cross-MCP-normalized `events_normalized` carries the same enum across siblings (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted). Read-only; safe to call repeatedly.",
+      annotations: {
+        title: 'Get homes.com property + tax history (combined)',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        url: z.string().describe('homes.com property detail URL or path.'),
+      },
+    },
+    async ({ url }) => {
+      const path = urlToPath(url);
+      const html = await client.fetchHtml(path);
+      const root = parseHtml(html);
+      const listing_events = parsePropertyHistory(root);
+      return textResult({
+        property_id: extractPropertyIdFromHtml(html, url),
+        url,
+        listing_events,
+        ownership_events: parseOwnershipHistory(root),
+        lien_events: parseLienHistory(root),
+        events_normalized: normalizeEvents(listing_events),
+        tax_records: parseTaxHistory(root),
       });
     }
   );

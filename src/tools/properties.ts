@@ -22,6 +22,18 @@ import {
   hoaToMonthlyUsd,
   isTaxSentinel,
 } from '../format.js';
+import {
+  normalizeEvents,
+  parseLienHistory,
+  parseOwnershipHistory,
+  parsePropertyHistory,
+  parseTaxHistory,
+  type LienEvent,
+  type ListingEvent,
+  type NormalizedEvent,
+  type OwnershipEvent,
+  type TaxRecord,
+} from './history.js';
 
 /**
  * homes.com property detail: GET /property/<address-slug>/<propertyId>/
@@ -212,6 +224,24 @@ export interface FormattedProperty {
   // description was available upstream; absent when there was no
   // description to extract from.
   extracted_features?: ExtractedFeatures;
+  /**
+   * Price + ownership + lien timelines + events_normalized. Populated
+   * when `homes_get_property` is called with `include_price_history:
+   * true` (or the matching `include_tax_history`). Same shape as the
+   * standalone `homes_get_property_history` tool emits (#27).
+   */
+  price_history?: {
+    listing_events: ListingEvent[];
+    ownership_events: OwnershipEvent[];
+    lien_events: LienEvent[];
+    events_normalized: NormalizedEvent[];
+  };
+  /**
+   * Year-by-year tax records. Populated when `homes_get_property` is
+   * called with `include_tax_history: true`. Same shape as the
+   * standalone `homes_get_tax_history` tool emits (#27).
+   */
+  tax_history?: TaxRecord[];
 }
 
 /**
@@ -221,6 +251,14 @@ export interface FormattedProperty {
  */
 export interface FormatOptions {
   includeDescription?: boolean;
+  /**
+   * Inline `price_history` (listing/ownership/lien events plus
+   * events_normalized) on the formatted record. Parsed from the same
+   * HTML the format call already has — no extra round trip (#27).
+   */
+  includePriceHistory?: boolean;
+  /** Inline `tax_history` records on the formatted record (#27). */
+  includeTaxHistory?: boolean;
 }
 
 function toNumber(v: unknown): number | undefined {
@@ -423,6 +461,25 @@ export function format(
     out.extracted_features = extractedFeatures;
   }
 
+  // #27: optionally inline history series parsed from the same HTML
+  // the format call already has. Saves a second round trip vs calling
+  // homes_get_property_history / homes_get_tax_history separately.
+  if ((opts.includePriceHistory || opts.includeTaxHistory) && html) {
+    const root = parseHtml(html);
+    if (opts.includePriceHistory) {
+      const listing_events = parsePropertyHistory(root);
+      out.price_history = {
+        listing_events,
+        ownership_events: parseOwnershipHistory(root),
+        lien_events: parseLienHistory(root),
+        events_normalized: normalizeEvents(listing_events),
+      };
+    }
+    if (opts.includeTaxHistory) {
+      out.tax_history = parseTaxHistory(root);
+    }
+  }
+
   return out;
 }
 
@@ -435,7 +492,7 @@ export function registerPropertyTools(
     {
       title: 'Get homes.com property details',
       description:
-        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot size, parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. The raw `description` is omitted by default to save chat-history budget; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
+        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot size, parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Get homes.com property details',
         readOnlyHint: true,
@@ -455,12 +512,30 @@ export function registerPropertyTools(
           .describe(
             'When true, include the raw listing `description` marketing prose. Default false — the structured `extracted_features` field surfaces the keywords callers usually want; the prose itself is heavy chat-history weight.'
           ),
+        include_price_history: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'When true, inline `price_history` (listing/ownership/lien events + events_normalized) on the response — the same data `homes_get_property_history` returns. Saves a second round trip when you need both (#27).'
+          ),
+        include_tax_history: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'When true, inline `tax_history` records — same data `homes_get_tax_history` returns. Saves a second round trip when you need both (#27).'
+          ),
       },
     },
-    async ({ url, include_description }) => {
+    async ({ url, include_description, include_price_history, include_tax_history }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
       return textResult(
-        format(listing, html, { includeDescription: include_description })
+        format(listing, html, {
+          includeDescription: include_description,
+          includePriceHistory: include_price_history,
+          includeTaxHistory: include_tax_history,
+        })
       );
     }
   );
