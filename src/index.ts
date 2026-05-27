@@ -30,7 +30,7 @@ import { registerSavedTools } from './tools/saved.js';
 import { registerRentVsBuyTools } from './tools/rent-vs-buy.js';
 import { registerByAddressTools } from './tools/by-address.js';
 
-const VERSION = '0.7.0'; // x-release-please-version
+const VERSION = '0.8.0'; // x-release-please-version
 
 const port = process.env.HOMES_WS_PORT
   ? Number(process.env.HOMES_WS_PORT)
