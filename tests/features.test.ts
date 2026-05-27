@@ -118,6 +118,23 @@ describe('extractFeatures', () => {
     it('returns null when no furnishing language present', () => {
       expect(extractFeatures('Lovely garden home.', []).furnished).toBe(null);
     });
+    it('does NOT misfire on bare "with exceptions" in non-furnishing context (false-positive pin)', () => {
+      // "with exceptions" by itself shows up in title-report, HOA, and
+      // disclosure prose unrelated to furnishings — the furnished token
+      // must anchor the match.
+      expect(
+        extractFeatures(
+          'Sold with exceptions per title report; modern open floor plan.',
+          []
+        ).furnished
+      ).toBeNull();
+      expect(
+        extractFeatures(
+          'HOA documents available with exceptions noted in section 3.',
+          []
+        ).furnished
+      ).toBeNull();
+    });
   });
 
   describe('dock', () => {
@@ -237,5 +254,85 @@ describe('loadCommunities', () => {
     process.env.HOMES_COMMUNITIES_FILE = path;
     expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
     spy.mockRestore();
+  });
+
+  it('caches the missing-file fallback so repeated calls do not re-stat (negative cache)', () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.HOMES_COMMUNITIES_FILE = join(dir, 'no-such-file.json');
+
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    // The stderr warning should fire only once — subsequent calls
+    // short-circuit on the negative cache instead of re-stat+re-warn.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    warnSpy.mockRestore();
+  });
+
+  it('caches the malformed-JSON fallback so repeated calls do not re-read (negative cache)', () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const path = join(dir, 'bad.json');
+    writeFileSync(path, '{ not json');
+    process.env.HOMES_COMMUNITIES_FILE = path;
+
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    // Same negative-cache shape: one warning, not three.
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    warnSpy.mockRestore();
+  });
+
+  it('caches the non-array fallback so repeated calls do not re-read (negative cache)', () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const path = join(dir, 'notarray.json');
+    writeFileSync(path, JSON.stringify({ foo: 'bar' }));
+    process.env.HOMES_COMMUNITIES_FILE = path;
+
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    warnSpy.mockRestore();
+  });
+
+  it('invalidates the negative cache when the env var path changes', () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    process.env.HOMES_COMMUNITIES_FILE = join(dir, 'missing-a.json');
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    // Changing the path should force a fresh filesystem check + new warning.
+    process.env.HOMES_COMMUNITIES_FILE = join(dir, 'missing-b.json');
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+
+    warnSpy.mockRestore();
+  });
+
+  it('invalidates the negative cache when the env var is unset', () => {
+    const warnSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    process.env.HOMES_COMMUNITIES_FILE = join(dir, 'missing.json');
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    delete process.env.HOMES_COMMUNITIES_FILE;
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    // Re-setting should re-warn (cache invalidated on the unset).
+    process.env.HOMES_COMMUNITIES_FILE = join(dir, 'missing.json');
+    expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+
+    warnSpy.mockRestore();
   });
 });

@@ -46,28 +46,39 @@ export const DEFAULT_COMMUNITIES: string[] = [
 
 let cachedCommunities: string[] | null = null;
 let cachedPath: string | null = null;
+// Remembers paths we've already failed to load (missing / malformed /
+// non-array) so we don't re-stat + re-warn on every `format()` call when
+// a user has `HOMES_COMMUNITIES_FILE` pointed at a bad path. Cleared
+// whenever the env var changes or is unset, mirroring the positive cache.
+let cachedFallbackForPath: string | null = null;
 
 /**
  * Resolve the active community vocabulary. Reads `HOMES_COMMUNITIES_FILE`
  * (expects a JSON string array). Falls back to `DEFAULT_COMMUNITIES` when
  * unset, the file is missing, or the JSON is malformed (with a stderr
  * warning so misconfiguration is visible). Cached per process keyed by
- * the env-var value.
+ * the env-var value — including the negative case, so a misconfigured
+ * path doesn't re-stat the filesystem on every call.
  */
 export function loadCommunities(): string[] {
   const path = process.env.HOMES_COMMUNITIES_FILE?.trim();
   if (!path) {
     cachedCommunities = null;
     cachedPath = null;
+    cachedFallbackForPath = null;
     return DEFAULT_COMMUNITIES;
   }
   if (cachedCommunities && cachedPath === path) {
     return cachedCommunities;
   }
+  if (cachedFallbackForPath === path) {
+    return DEFAULT_COMMUNITIES;
+  }
   if (!existsSync(path)) {
     console.error(
       `[homes-mcp] HOMES_COMMUNITIES_FILE="${path}" not found — falling back to DEFAULT_COMMUNITIES.`
     );
+    cachedFallbackForPath = path;
     return DEFAULT_COMMUNITIES;
   }
   try {
@@ -77,10 +88,12 @@ export function loadCommunities(): string[] {
       console.error(
         `[homes-mcp] HOMES_COMMUNITIES_FILE="${path}" must be a JSON string array — falling back to DEFAULT_COMMUNITIES.`
       );
+      cachedFallbackForPath = path;
       return DEFAULT_COMMUNITIES;
     }
     cachedCommunities = parsed;
     cachedPath = path;
+    cachedFallbackForPath = null;
     return cachedCommunities;
   } catch (err) {
     console.error(
@@ -88,6 +101,7 @@ export function loadCommunities(): string[] {
         err instanceof Error ? err.message : String(err)
       } — falling back to DEFAULT_COMMUNITIES.`
     );
+    cachedFallbackForPath = path;
     return DEFAULT_COMMUNITIES;
   }
 }
@@ -109,7 +123,11 @@ const BASEMENT_PARTIAL_RE =
 const BASEMENT_MENTIONED_RE = /\bbasement\b/i;
 
 const FURNISHED_FULLY_RE = /\b(?:fully furnished|sold furnished|turnkey)\b/i;
-const FURNISHED_PARTIAL_RE = /\b(?:almost furnished|furnished with exceptions|with exceptions)\b/i;
+// `with exceptions` is intentionally NOT a standalone alternative — real
+// estate descriptions routinely contain "with exceptions" in title /
+// survey / HOA / disclosure contexts unrelated to furnishings. Require
+// the `furnished` token to anchor the match.
+const FURNISHED_PARTIAL_RE = /\b(?:almost furnished|furnished with exceptions)\b/i;
 const FURNISHED_NEGOTIABLE_RE = /\bfurnishings (?:are )?negotiable\b/i;
 
 const DOCK_PRIVATE_RE = /\bprivate (?:boat )?dock\b/i;
