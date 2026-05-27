@@ -3,6 +3,7 @@ import type { HomesClient } from '../../src/client.js';
 import { registerHealthcheckTools } from '../../src/tools/healthcheck.js';
 import {
   FetchproxyBridgeDownError,
+  FetchproxyProtocolError,
   FetchproxyTimeoutError,
 } from '../../src/transport-fetchproxy.js';
 import type { BridgeStatus } from '../../src/transport.js';
@@ -17,6 +18,7 @@ const DEFAULT_STATUS: BridgeStatus = {
   lastFailureAt: null,
   lastFailureReason: null,
   consecutiveFailures: 0,
+  lastExtensionMessageAt: null,
 };
 
 function stubClient(args: {
@@ -61,6 +63,9 @@ describe('homes_healthcheck tool', () => {
   });
 
   it('classifies a FetchproxyTimeoutError as kind=timeout with role-specific hint', async () => {
+    // 0.8.0+: role_at_failure is read off the typed error
+    // (`err.role`), not from a post-throw bridgeStatus() snapshot.
+    // Pass `role: 'peer'` on the error so the assertion below holds.
     const client = stubClient({
       status: {
         role: 'peer',
@@ -72,7 +77,6 @@ describe('homes_healthcheck tool', () => {
         new FetchproxyTimeoutError({
           url: 'https://www.homes.com/robots.txt',
           timeoutMs: 25,
-          elapsedMs: 28,
           role: 'peer',
           port: 37200,
         })
@@ -109,11 +113,10 @@ describe('homes_healthcheck tool', () => {
       },
       fetchHtml: vi.fn().mockRejectedValue(
         new FetchproxyBridgeDownError({
-          url: 'https://www.homes.com/robots.txt',
-          elapsedMs: 11,
-          role: null,
-          port: 37149,
           originalError: 'Could not establish connection.',
+          retryAttempted: true,
+          op: 'fetch',
+          url: 'https://www.homes.com/robots.txt',
         })
       ),
     });
@@ -139,9 +142,6 @@ describe('homes_healthcheck tool', () => {
         new FetchproxyTimeoutError({
           url: 'https://www.homes.com/robots.txt',
           timeoutMs: 25,
-          elapsedMs: 28,
-          role: null,
-          port: 37149,
         })
       ),
     });
@@ -159,15 +159,11 @@ describe('homes_healthcheck tool', () => {
     expect(parsed.hint).toMatch(/never bound a role/);
   });
 
-  it('classifies a plain "fetchproxy transport error" as kind=transport', async () => {
+  it('classifies a generic FetchproxyProtocolError as kind=transport', async () => {
     const client = stubClient({
       fetchHtml: vi
         .fn()
-        .mockRejectedValue(
-          new Error(
-            'fetchproxy transport error after 12ms (role=host): extension offline'
-          )
-        ),
+        .mockRejectedValue(new FetchproxyProtocolError('extension offline')),
     });
     harness = await createTestHarness((server) =>
       registerHealthcheckTools(server, client)
@@ -184,12 +180,11 @@ describe('homes_healthcheck tool', () => {
       status: { role: 'peer', port: 37149, serverVersion: '0.5.0' },
       fetchHtml: vi.fn().mockRejectedValue(
         new FetchproxyBridgeDownError({
-          url: 'https://www.homes.com/robots.txt',
-          elapsedMs: 14,
-          role: 'peer',
-          port: 37149,
           originalError:
             'tab fetch failed: Error: Could not establish connection. Receiving end does not exist.',
+          retryAttempted: true,
+          op: 'fetch',
+          url: 'https://www.homes.com/robots.txt',
         })
       ),
     });
@@ -249,5 +244,206 @@ describe('homes_healthcheck tool', () => {
     const parsed = parseToolResult<{ ok: boolean; error: { kind: string } }>(r);
     expect(parsed.ok).toBe(false);
     expect(parsed.error.kind).toBe('other');
+  });
+
+  // ---------- 0.8.0 integration: classifyBridgeError + typed-error fields ----------
+
+  it('surfaces error_kind from classifyBridgeError() (timeout maps to "timeout")', async () => {
+    // The healthcheck output's `error_kind` is the canonical
+    // BridgeError discriminator returned by classifyBridgeError().
+    // For a FetchproxyTimeoutError that's `'timeout'` — same string
+    // the legacy `error.kind` field carries, so callers can switch
+    // on either, but `error_kind` is preferred going forward.
+    const client = stubClient({
+      fetchHtml: vi.fn().mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/robots.txt',
+          timeoutMs: 25,
+          role: 'host',
+          port: 37149,
+          elapsedMs: 27,
+        })
+      ),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{ error_kind: string }>(r);
+    expect(parsed.error_kind).toBe('timeout');
+  });
+
+  it('error_kind is "bridge_down" for FetchproxyBridgeDownError', async () => {
+    const client = stubClient({
+      fetchHtml: vi.fn().mockRejectedValue(
+        new FetchproxyBridgeDownError({
+          originalError: 'Could not establish connection.',
+          retryAttempted: true,
+          op: 'fetch',
+          url: 'https://www.homes.com/robots.txt',
+          role: 'host',
+          port: 37149,
+        })
+      ),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{ error_kind: string }>(r);
+    expect(parsed.error_kind).toBe('bridge_down');
+  });
+
+  it('error_kind is "protocol" for a bare FetchproxyProtocolError (non-subclass)', async () => {
+    // Note: the existing `error.kind` field uses 'transport' for this
+    // case to keep the user-facing JSON shape stable. The new
+    // `error_kind` discriminator surfaces the canonical 'protocol'
+    // string from classifyBridgeError() so callers that want the
+    // upstream taxonomy can read it.
+    const client = stubClient({
+      fetchHtml: vi
+        .fn()
+        .mockRejectedValue(new FetchproxyProtocolError('extension offline')),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{
+      error_kind: string;
+      error: { kind: string };
+    }>(r);
+    expect(parsed.error_kind).toBe('protocol');
+    expect(parsed.error.kind).toBe('transport');
+  });
+
+  it('error_kind is "other" for an unrelated Error', async () => {
+    const client = stubClient({
+      fetchHtml: vi.fn().mockRejectedValue(new Error('something else')),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{ error_kind: string }>(r);
+    expect(parsed.error_kind).toBe('other');
+  });
+
+  it('surfaces the bridge-down error .hint to the model for actionable recovery guidance', async () => {
+    // FetchproxyBridgeDownError ships with a `.hint` string the
+    // upstream dep curates (SW eviction recovery steps). Surface it
+    // verbatim under error.bridge_hint so the LLM gets the canonical
+    // wording rather than relying on us to re-paraphrase it.
+    const client = stubClient({
+      fetchHtml: vi.fn().mockRejectedValue(
+        new FetchproxyBridgeDownError({
+          originalError: 'Could not establish connection.',
+          retryAttempted: true,
+          op: 'fetch',
+          url: 'https://www.homes.com/robots.txt',
+          role: 'host',
+          port: 37149,
+        })
+      ),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{
+      error: { bridge_hint?: string };
+    }>(r);
+    expect(parsed.error.bridge_hint).toBeDefined();
+    expect(parsed.error.bridge_hint!.length).toBeGreaterThan(0);
+  });
+
+  it('reads role/port/elapsed_ms directly off the typed timeout error (0.8.0 fields)', async () => {
+    // 0.8.0+: FetchproxyTimeoutError carries role/port/elapsedMs
+    // captured at throw time. Use those directly instead of re-reading
+    // bridgeStatus() post-throw — the error fields are the source of
+    // truth for the moment of failure.
+    const client = stubClient({
+      // Make the post-throw snapshot inconsistent with the error
+      // fields so the test pins which one we trust.
+      status: { role: 'peer', port: 99999 },
+      fetchHtml: vi.fn().mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/robots.txt',
+          timeoutMs: 30_000,
+          role: 'host',
+          port: 37149,
+          elapsedMs: 30_007,
+        })
+      ),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{
+      error: {
+        role_at_failure: string | null;
+        port_at_failure?: number;
+        elapsed_ms?: number;
+      };
+    }>(r);
+    // role_at_failure now comes from err.role, not the snapshot
+    expect(parsed.error.role_at_failure).toBe('host');
+    expect(parsed.error.port_at_failure).toBe(37149);
+    expect(parsed.error.elapsed_ms).toBe(30_007);
+  });
+
+  it('reads role/port directly off the typed bridge-down error', async () => {
+    const client = stubClient({
+      status: { role: 'peer', port: 99999 },
+      fetchHtml: vi.fn().mockRejectedValue(
+        new FetchproxyBridgeDownError({
+          originalError: 'Could not establish connection.',
+          retryAttempted: true,
+          op: 'fetch',
+          url: 'https://www.homes.com/robots.txt',
+          role: 'host',
+          port: 37149,
+        })
+      ),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{
+      error: { role_at_failure: string | null; port_at_failure?: number };
+    }>(r);
+    expect(parsed.error.role_at_failure).toBe('host');
+    expect(parsed.error.port_at_failure).toBe(37149);
+  });
+
+  it('surfaces last_extension_message_at in the bridge block (0.8.0 liveness signal)', async () => {
+    const EXT_AT = Date.parse('2026-05-25T03:39:46Z');
+    const client = stubClient({
+      status: {
+        lastExtensionMessageAt: EXT_AT,
+      },
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{
+      bridge: { last_extension_message_at: number | null };
+    }>(r);
+    expect(parsed.bridge.last_extension_message_at).toBe(EXT_AT);
+  });
+
+  it('last_extension_message_at defaults to null pre-first-frame', async () => {
+    const client = stubClient({});
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{
+      bridge: { last_extension_message_at: number | null };
+    }>(r);
+    expect(parsed.bridge.last_extension_message_at).toBeNull();
   });
 });

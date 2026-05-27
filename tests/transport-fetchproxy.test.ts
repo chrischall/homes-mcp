@@ -1,7 +1,8 @@
-// Adapter-level tests for FetchproxyTransport. We don't bring up a real
-// WebSocket here — the protocol-level tests live in @fetchproxy/server.
-// What we verify is the path → URL prepending and the discriminated-
-// union mapping (ok:true → triple, ok:false → throw).
+// Adapter-level tests for FetchproxyTransport against @fetchproxy/server
+// 0.8.0+. The lazy-revive retry, per-request timeout, and freshness
+// counters live in the server itself now — we don't re-test them here.
+// What this file covers is the homes-mcp-shaped surface: URL/subdomain
+// routing, BridgeStatus mapping, error pass-through, and start/close.
 import { describe, it, expect, vi } from 'vitest';
 import {
   FetchproxyBridgeDownError,
@@ -12,7 +13,8 @@ import {
 type Inner = {
   listen: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
-  fetch: ReturnType<typeof vi.fn>;
+  request: ReturnType<typeof vi.fn>;
+  bridgeHealth: ReturnType<typeof vi.fn>;
   role: 'host' | 'peer' | null;
 };
 
@@ -20,7 +22,16 @@ function stubInner(role: 'host' | 'peer' | null = 'host'): Inner {
   return {
     listen: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
-    fetch: vi.fn(),
+    request: vi.fn(),
+    bridgeHealth: vi.fn().mockReturnValue({
+      role,
+      port: 37149,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastFailureReason: null,
+      consecutiveFailures: 0,
+      lastExtensionMessageAt: null,
+    }),
     role,
   };
 }
@@ -31,47 +42,48 @@ function installInner(t: FetchproxyTransport, inner: Inner): void {
 }
 
 describe('FetchproxyTransport', () => {
-  it('prepends https://www.homes.com to relative paths', async () => {
+  it('routes relative paths via subdomain=www (resolves to www.homes.com)', async () => {
     const t = new FetchproxyTransport({ version: '0.0.0' });
     const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: true,
+    inner.request.mockResolvedValue({
       status: 200,
       body: 'x',
-      url: 'https://www.homes.com/x',
+      url: 'https://www.homes.com/home/40732555',
     });
     installInner(t, inner);
 
     await t.fetch({ path: '/home/40732555', method: 'GET' });
-    expect(inner.fetch.mock.calls[0][0].url).toBe(
-      'https://www.homes.com/home/40732555'
-    );
-    expect(inner.fetch.mock.calls[0][0].tabUrl).toBe('https://www.homes.com/');
+    expect(inner.request).toHaveBeenCalledWith('GET', '/home/40732555', {
+      subdomain: 'www',
+      headers: undefined,
+      body: undefined,
+    });
   });
 
-  it('passes through absolute URLs', async () => {
+  it('passes absolute URLs through; subdomain is harmless because server derives tabUrl from URL host', async () => {
+    // 0.8.0+: server's request() ignores `subdomain` for absolute
+    // paths and derives tabUrl from the URL host directly. So always
+    // passing `subdomain: 'www'` is safe even for photos.homes.com
+    // URLs — the server routes through a photos.homes.com tab, not www.
     const t = new FetchproxyTransport({ version: '0.0.0' });
     const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: true,
+    inner.request.mockResolvedValue({
       status: 200,
       body: '',
       url: 'https://photos.homes.com/x',
     });
     installInner(t, inner);
 
-    await t.fetch({
-      path: 'https://photos.homes.com/x',
-      method: 'GET',
-    });
-    expect(inner.fetch.mock.calls[0][0].url).toBe('https://photos.homes.com/x');
+    await t.fetch({ path: 'https://photos.homes.com/x', method: 'GET' });
+    const call = inner.request.mock.calls[0];
+    expect(call[0]).toBe('GET');
+    expect(call[1]).toBe('https://photos.homes.com/x');
   });
 
-  it('returns the {status, body, url} triple on ok:true', async () => {
+  it('returns {status, body, url} from inner.request()', async () => {
     const t = new FetchproxyTransport({ version: '0.0.0' });
     const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: true,
+    inner.request.mockResolvedValue({
       status: 200,
       body: 'hello',
       url: 'https://www.homes.com/x',
@@ -86,267 +98,71 @@ describe('FetchproxyTransport', () => {
     });
   });
 
-  it('throws when fetchproxy returns ok:false', async () => {
+  it('forwards method, headers, and body through to inner.request()', async () => {
     const t = new FetchproxyTransport({ version: '0.0.0' });
     const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: false,
-      error: 'extension offline',
+    inner.request.mockResolvedValue({
+      status: 204,
+      body: '',
+      url: 'https://www.homes.com/api/x',
     });
     installInner(t, inner);
 
-    await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toThrow(
-      /extension offline/
+    await t.fetch({
+      path: '/api/x',
+      method: 'POST',
+      headers: { 'X-Test': '1' },
+      body: '{"a":1}',
+    });
+    expect(inner.request).toHaveBeenCalledWith('POST', '/api/x', {
+      subdomain: 'www',
+      headers: { 'X-Test': '1' },
+      body: '{"a":1}',
+    });
+  });
+
+  // Pass-through of typed protocol errors — homes_healthcheck still
+  // narrows on these instances, so we pin that they propagate unwrapped.
+  it('propagates FetchproxyBridgeDownError from inner.request()', async () => {
+    const t = new FetchproxyTransport({ version: '0.0.0' });
+    const inner = stubInner('host');
+    inner.request.mockRejectedValue(
+      new FetchproxyBridgeDownError({
+        originalError: 'Could not establish connection.',
+        retryAttempted: true,
+        op: 'fetch',
+        url: 'https://www.homes.com/x',
+      })
     );
-  });
-
-  // The "Could not establish connection. Receiving end does not exist."
-  // string comes from Chrome's runtime.sendMessage when the extension's
-  // service worker has been evicted (the default eviction window is ~30s
-  // idle). Map that one specific failure mode to a typed error with the
-  // same diagnostic shape we already give for timeouts — so callers can
-  // tell "SW dead" apart from "extension offline" apart from "Homes
-  // returned 410" without grep'ing strings.
-  it('throws FetchproxyBridgeDownError on SW-eviction error pattern', async () => {
-    const t = new FetchproxyTransport({
-      version: '0.0.0',
-      port: 37200,
-      bridgeRevivalDelayMs: 1,
-    });
-    const inner = stubInner('peer');
-    inner.fetch.mockResolvedValue({
-      ok: false,
-      error:
-        'tab fetch failed: Error: Could not establish connection. Receiving end does not exist.',
-      kind: 'content_script_unreachable',
-    });
-    installInner(t, inner);
-
-    try {
-      await t.fetch({ path: '/x', method: 'GET' });
-      expect.fail('expected bridge-down error');
-    } catch (e) {
-      expect(e).toBeInstanceOf(FetchproxyBridgeDownError);
-      const err = e as FetchproxyBridgeDownError;
-      expect(err.role).toBe('peer');
-      expect(err.port).toBe(37200);
-      expect(err.url).toBe('https://www.homes.com/x');
-      expect(err.originalError).toMatch(/Could not establish connection/);
-      // Hint must mention service worker so the next debugger knows
-      // where to look — the upstream extension, not this repo.
-      expect(err.hint).toMatch(/service worker/i);
-    }
-  });
-
-  it('routes content_script_unreachable kind to FetchproxyBridgeDownError regardless of message text', async () => {
-    // The decision to throw FetchproxyBridgeDownError is now driven by
-    // @fetchproxy/server's typed `kind` field, not by regex on `error`.
-    // So even if the message text is unrecognizable, a server-classified
-    // content_script_unreachable still routes to the bridge-down error.
-    // Both attempts (#29 lazy-revive) come back unreachable -> bridge-down.
-    const t = new FetchproxyTransport({
-      version: '0.0.0',
-      bridgeRevivalDelayMs: 1,
-    });
-    const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: false,
-      error: 'Receiving end does not exist.',
-      kind: 'content_script_unreachable',
-    });
     installInner(t, inner);
     await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
       FetchproxyBridgeDownError
     );
   });
 
-  it('still throws a generic Error (not FetchproxyBridgeDownError) for unrelated ok:false reasons', async () => {
+  it('propagates FetchproxyTimeoutError from inner.request()', async () => {
     const t = new FetchproxyTransport({ version: '0.0.0' });
-    const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: false,
-      error: 'no homes.com tab open',
-      kind: 'no_tab',
-    });
-    installInner(t, inner);
-    // Must reject — but NOT as a bridge-down error.
-    try {
-      await t.fetch({ path: '/x', method: 'GET' });
-      expect.fail('expected reject');
-    } catch (e) {
-      expect(e).not.toBeInstanceOf(FetchproxyBridgeDownError);
-      expect((e as Error).message).toMatch(/no homes\.com tab open/);
-    }
-  });
-
-  // Freshness counters give the operator visibility into "is this
-  // bridge healthy or limping along." A long-idle bridge with no recent
-  // success is hard to distinguish from a brand-new one — these counters
-  // give homes_healthcheck something concrete to surface.
-  it('updates lastSuccessAt + resets consecutiveFailures on success', async () => {
-    const t = new FetchproxyTransport({ version: '0.0.0' });
-    const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: 'ok',
-      url: 'https://www.homes.com/x',
-    });
-    installInner(t, inner);
-
-    const before = t.status();
-    expect(before.lastSuccessAt).toBeNull();
-    expect(before.consecutiveFailures).toBe(0);
-
-    const t0 = Date.now();
-    await t.fetch({ path: '/x', method: 'GET' });
-    const after = t.status();
-    expect(after.lastSuccessAt).not.toBeNull();
-    expect(after.lastSuccessAt!).toBeGreaterThanOrEqual(t0);
-    expect(after.consecutiveFailures).toBe(0);
-  });
-
-  it('updates lastFailureAt + increments consecutiveFailures on failure', async () => {
-    const t = new FetchproxyTransport({ version: '0.0.0' });
-    const inner = stubInner();
-    inner.fetch.mockResolvedValue({
-      ok: false,
-      error: 'something broke',
-    });
-    installInner(t, inner);
-
-    await expect(t.fetch({ path: '/a', method: 'GET' })).rejects.toThrow();
-    await expect(t.fetch({ path: '/b', method: 'GET' })).rejects.toThrow();
-    const s = t.status();
-    expect(s.lastFailureAt).not.toBeNull();
-    expect(s.consecutiveFailures).toBe(2);
-    expect(s.lastFailureReason).toMatch(/something broke/);
-  });
-
-  it('resets consecutiveFailures back to 0 after a successful fetch', async () => {
-    const t = new FetchproxyTransport({ version: '0.0.0' });
-    const inner = stubInner();
-    // Two failures then a success.
-    inner.fetch
-      .mockResolvedValueOnce({ ok: false, error: 'transient' })
-      .mockResolvedValueOnce({ ok: false, error: 'transient' })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        body: 'ok',
-        url: 'https://www.homes.com/x',
-      });
-    installInner(t, inner);
-
-    await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toThrow();
-    await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toThrow();
-    expect(t.status().consecutiveFailures).toBe(2);
-    await t.fetch({ path: '/x', method: 'GET' });
-    expect(t.status().consecutiveFailures).toBe(0);
-  });
-
-  it('throws FetchproxyTimeoutError with role + port + elapsed diagnostics', async () => {
-    const t = new FetchproxyTransport({
-      version: '0.0.0',
-      fetchTimeoutMs: 25,
-      port: 37200,
-    });
     const inner = stubInner('peer');
-    // Never resolves — simulates a frozen tab / dropped extension.
-    inner.fetch.mockReturnValue(new Promise(() => {}));
-    installInner(t, inner);
-
-    try {
-      await t.fetch({ path: '/slow', method: 'GET' });
-      expect.fail('expected timeout');
-    } catch (e) {
-      expect(e).toBeInstanceOf(FetchproxyTimeoutError);
-      const err = e as FetchproxyTimeoutError;
-      expect(err.role).toBe('peer');
-      expect(err.port).toBe(37200);
-      expect(err.timeoutMs).toBe(25);
-      // Timer precision varies in CI — assert the field is present and
-      // roughly within the timeout's order of magnitude, not the exact
-      // setTimeout deadline. Real timers don't guarantee >= the configured
-      // delay; 24ms is enough to fail >= 25 on a fast runner.
-      expect(err.elapsedMs).toBeGreaterThan(0);
-      expect(err.elapsedMs).toBeLessThan(500);
-      expect(err.url).toBe('https://www.homes.com/slow');
-      // The hint distinguishes "bridge never came up" (role null) from
-      // "bridge alive, request stalled" (role non-null).
-      expect(err.hint).toMatch(/bridge is role=peer on port 37200/);
-    }
-    // The timeout path runs `recordFailure` inside the setTimeout
-    // callback. Assert that updates the freshness counters too, so a
-    // long-idle bridge that hits its first timeout is observable via
-    // homes_healthcheck the same way an ok:false failure is.
-    const s = t.status();
-    expect(s.lastFailureAt).not.toBeNull();
-    expect(s.lastFailureReason).toMatch(/^timeout: /);
-    expect(s.consecutiveFailures).toBe(1);
-  });
-
-  it('hint changes when role is still null (bridge never bound on startup)', async () => {
-    const t = new FetchproxyTransport({ version: '0.0.0', fetchTimeoutMs: 25 });
-    const inner = stubInner(null);
-    inner.fetch.mockReturnValue(new Promise(() => {}));
-    installInner(t, inner);
-
-    try {
-      await t.fetch({ path: '/x', method: 'GET' });
-      expect.fail('expected timeout');
-    } catch (e) {
-      const err = e as FetchproxyTimeoutError;
-      expect(err.role).toBeNull();
-      expect(err.hint).toMatch(/bridge never bound role/);
-    }
-  });
-
-  it('swallows a late rejection on inner so the post-timeout WS drop is not an unhandled rejection', async () => {
-    const t = new FetchproxyTransport({ version: '0.0.0', fetchTimeoutMs: 25 });
-    const inner = stubInner();
-    // inner.fetch resolves nothing for the race, but then rejects later —
-    // simulates a WebSocket drop happening AFTER the deadline already fired.
-    inner.fetch.mockImplementation(
-      () =>
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('ws closed unexpectedly')), 75);
-        })
+    inner.request.mockRejectedValue(
+      new FetchproxyTimeoutError({
+        url: 'https://www.homes.com/slow',
+        timeoutMs: 30_000,
+      })
     );
     installInner(t, inner);
-
-    // The transport.fetch call should reject with the timeout error first.
-    await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
+    await expect(t.fetch({ path: '/slow', method: 'GET' })).rejects.toBeInstanceOf(
       FetchproxyTimeoutError
     );
-    // Now let the late rejection settle. The no-op handler we attached
-    // up front should consume it; if not, vitest reports an unhandled
-    // rejection and fails the run.
-    await new Promise((r) => setTimeout(r, 100));
   });
 
-  it('does not fire the timeout when the inner fetch resolves in time', async () => {
-    const t = new FetchproxyTransport({ version: '0.0.0', fetchTimeoutMs: 1000 });
+  it('propagates other protocol errors as plain throws', async () => {
+    const t = new FetchproxyTransport({ version: '0.0.0' });
     const inner = stubInner();
-    inner.fetch.mockImplementation(
-      () =>
-        new Promise((resolve) =>
-          setTimeout(
-            () =>
-              resolve({
-                ok: true,
-                status: 200,
-                body: 'ok',
-                url: 'https://www.homes.com/x',
-              }),
-            10
-          )
-        )
-    );
+    inner.request.mockRejectedValue(new Error('no homes.com tab open'));
     installInner(t, inner);
-
-    const result = await t.fetch({ path: '/x', method: 'GET' });
-    expect(result.status).toBe(200);
+    await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toThrow(
+      /no homes\.com tab open/
+    );
   });
 
   it('start/close delegate to the inner FetchproxyServer', async () => {
@@ -361,152 +177,52 @@ describe('FetchproxyTransport', () => {
     expect(inner.close).toHaveBeenCalledTimes(1);
   });
 
-  it('status() returns role + port + version + timeout + freshness fields', () => {
+  it('status() projects bridgeHealth() into homes-mcp BridgeStatus shape', () => {
     const t = new FetchproxyTransport({
       version: '1.2.3',
       port: 37200,
-      fetchTimeoutMs: 5000,
+      fetchTimeoutMs: 5_000,
     });
     const inner = stubInner('host');
+    inner.bridgeHealth.mockReturnValue({
+      role: 'host',
+      port: 37200,
+      lastSuccessAt: 111,
+      lastFailureAt: 222,
+      lastFailureReason: 'oops',
+      consecutiveFailures: 3,
+      lastExtensionMessageAt: 333,
+    });
     installInner(t, inner);
+
     expect(t.status()).toEqual({
       role: 'host',
       port: 37200,
       serverVersion: '1.2.3',
-      fetchTimeoutMs: 5000,
+      fetchTimeoutMs: 5_000,
+      lastSuccessAt: 111,
+      lastFailureAt: 222,
+      lastFailureReason: 'oops',
+      consecutiveFailures: 3,
+      // 0.8.0+: extension-side liveness signal (any inner frame, not
+      // just successes). Forwarded through unchanged from bridgeHealth().
+      lastExtensionMessageAt: 333,
+    });
+  });
+
+  it('status().role reflects whatever role bridgeHealth() reports (null pre-listen)', () => {
+    const t = new FetchproxyTransport({ version: '1.0.0' });
+    const inner = stubInner(null);
+    inner.bridgeHealth.mockReturnValue({
+      role: null,
+      port: 37149,
       lastSuccessAt: null,
       lastFailureAt: null,
       lastFailureReason: null,
       consecutiveFailures: 0,
+      lastExtensionMessageAt: null,
     });
-  });
-
-  it('status().role reflects whatever role the inner server reports (null pre-listen)', () => {
-    const t = new FetchproxyTransport({ version: '1.0.0' });
-    const inner = stubInner(null);
     installInner(t, inner);
     expect(t.status().role).toBeNull();
-  });
-
-  // SW eviction handling (#29): the extension's service worker dies
-  // after ~30s idle. A single retry with a short delay gives the SW
-  // time to wake on the inbound message, so most "first call after a
-  // pause" failures heal silently.
-  describe('lazy-revive retry on content_script_unreachable (#29)', () => {
-    it('retries ONCE on content_script_unreachable and surfaces the second result', async () => {
-      const t = new FetchproxyTransport({
-        version: '0.0.0',
-        bridgeRevivalDelayMs: 1, // collapse the wait so the test stays fast
-      });
-      const inner = stubInner('host');
-      inner.fetch
-        .mockResolvedValueOnce({
-          ok: false,
-          error: 'Could not establish connection. Receiving end does not exist.',
-          kind: 'content_script_unreachable',
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          body: 'revived',
-          url: 'https://www.homes.com/x',
-        });
-      installInner(t, inner);
-      const result = await t.fetch({ path: '/x', method: 'GET' });
-      expect(result.body).toBe('revived');
-      expect(inner.fetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('throws FetchproxyBridgeDownError when BOTH attempts return content_script_unreachable', async () => {
-      const t = new FetchproxyTransport({
-        version: '0.0.0',
-        bridgeRevivalDelayMs: 1,
-      });
-      const inner = stubInner('host');
-      inner.fetch.mockResolvedValue({
-        ok: false,
-        error: 'Could not establish connection.',
-        kind: 'content_script_unreachable',
-      });
-      installInner(t, inner);
-      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
-        FetchproxyBridgeDownError
-      );
-      // Confirm we DID retry — not a silent no-retry path masquerading.
-      expect(inner.fetch).toHaveBeenCalledTimes(2);
-      // Counter is attempt-level, not call-level: two transport attempts
-      // produce two recordFailure() calls within a single logical fetch().
-      expect(t.status().consecutiveFailures).toBe(2);
-    });
-
-    it('surfaces the second attempt error type when sw_down retry hits a different failure (timeout on retry)', async () => {
-      // Documents that on sw_down → error sequences the caller sees the
-      // second attempt's error type (e.g. timeout) rather than always
-      // FetchproxyBridgeDownError. Pin this so a future refactor doesn't
-      // silently start coalescing the second leg into a bridge-down error.
-      const t = new FetchproxyTransport({
-        version: '0.0.0',
-        bridgeRevivalDelayMs: 1,
-        fetchTimeoutMs: 25,
-      });
-      const inner = stubInner('host');
-      inner.fetch
-        .mockResolvedValueOnce({
-          ok: false,
-          error: 'Could not establish connection.',
-          kind: 'content_script_unreachable',
-        })
-        // Second attempt: simulate a hung retry (SW is mid-revival, still
-        // doesn't respond before the deadline).
-        .mockReturnValueOnce(new Promise(() => {}));
-      installInner(t, inner);
-      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
-        FetchproxyTimeoutError
-      );
-      expect(inner.fetch).toHaveBeenCalledTimes(2);
-    });
-
-    it('does not retry on non-SW failure kinds (no_tab passes through to a generic Error)', async () => {
-      const t = new FetchproxyTransport({
-        version: '0.0.0',
-        bridgeRevivalDelayMs: 1,
-      });
-      const inner = stubInner('host');
-      inner.fetch.mockResolvedValue({
-        ok: false,
-        error: 'no homes.com tab open',
-        kind: 'no_tab',
-      });
-      installInner(t, inner);
-      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toThrow(
-        /no homes\.com tab open/
-      );
-      // Only one call — no_tab is not a transient SW failure.
-      expect(inner.fetch).toHaveBeenCalledTimes(1);
-    });
-
-    it('exposes consecutiveFailures: 0 on a successful retry (revival counts as success)', async () => {
-      const t = new FetchproxyTransport({
-        version: '0.0.0',
-        bridgeRevivalDelayMs: 1,
-      });
-      const inner = stubInner('host');
-      inner.fetch
-        .mockResolvedValueOnce({
-          ok: false,
-          error: 'Could not establish connection.',
-          kind: 'content_script_unreachable',
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          body: 'ok',
-          url: 'https://www.homes.com/x',
-        });
-      installInner(t, inner);
-      await t.fetch({ path: '/x', method: 'GET' });
-      expect(t.status().consecutiveFailures).toBe(0);
-      expect(t.status().lastSuccessAt).not.toBeNull();
-    });
   });
 });

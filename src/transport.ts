@@ -46,6 +46,15 @@ export interface BridgeStatus {
   lastFailureReason: string | null;
   /** Number of failures since the last success (or since process start, if none). */
   consecutiveFailures: number;
+  /**
+   * 0.8.0+: wall-clock timestamp (Unix ms) of the most recent inner
+   * frame received from the fetchproxy extension — regardless of
+   * whether that frame was a success or error for the calling MCP.
+   * Distinct from `lastSuccessAt`/`lastFailureAt`, which track
+   * *user-visible* fetch outcomes. This is "is the extension still
+   * answering?" liveness. `null` until the first frame arrives.
+   */
+  lastExtensionMessageAt: number | null;
 }
 
 export interface HomesTransport {
