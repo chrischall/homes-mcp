@@ -10,6 +10,11 @@ import {
   parseIntegerLoose,
   type HTMLElement,
 } from '../html.js';
+import {
+  extractFeatures,
+  loadCommunities,
+  type ExtractedFeatures,
+} from '../features.js';
 
 /**
  * homes.com property detail: GET /property/<address-slug>/<propertyId>/
@@ -147,6 +152,20 @@ export interface FormattedProperty {
   cooling?: string;
   mls_id?: string;
   mls_source?: string;
+  // P0 context-savings (#13/#14): server-side extracted features lift
+  // keyword-parsing work out of the caller. Always present when a
+  // description was available upstream; absent when there was no
+  // description to extract from.
+  extracted_features?: ExtractedFeatures;
+}
+
+/**
+ * Per-call formatting controls. Default `includeDescription: false`
+ * trims the marketing-copy prose from the payload (caller can opt back
+ * in for the raw text). See #13.
+ */
+export interface FormatOptions {
+  includeDescription?: boolean;
 }
 
 function toNumber(v: unknown): number | undefined {
@@ -251,7 +270,11 @@ function formatAgent(agent: JsonLdAgent | undefined): FormattedAgent | undefined
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-export function format(listing: JsonLdListing, html?: string): FormattedProperty {
+export function format(
+  listing: JsonLdListing,
+  html?: string,
+  opts: FormatOptions = {}
+): FormattedProperty {
   const main = listing.mainEntity ?? {};
   const addr = main.address ?? {};
   const geo = main.geo ?? {};
@@ -263,11 +286,19 @@ export function format(listing: JsonLdListing, html?: string): FormattedProperty
     firstImage(main.image);
   const sqft = toNumber(main.floorSize?.value);
   const extras: Partial<FormattedProperty> = html ? extractDomFields(html) : {};
-  return {
+
+  // P0 (#14): compute extracted_features whenever the listing has a
+  // description, even when we'll omit the raw text from the response.
+  // Skip the work entirely when there's nothing to parse.
+  const description = listing.description;
+  const extractedFeatures = description
+    ? extractFeatures(description, loadCommunities())
+    : undefined;
+
+  const out: FormattedProperty = {
     property_id: extractPropertyId(listing),
     url: listing.url ?? listing['@id'] ?? '',
     name: listing.name,
-    description: listing.description,
     address: addr.streetAddress,
     city: addr.addressLocality,
     state: addr.addressRegion,
@@ -289,6 +320,18 @@ export function format(listing: JsonLdListing, html?: string): FormattedProperty
     brokerage: brokerageFrom(agent) ?? offers.seller?.name,
     ...extras,
   };
+
+  // P0 (#13): omit `description` by default — opt back in with
+  // includeDescription: true. The raw text is heavy marketing prose
+  // that callers were keyword-parsing and discarding.
+  if (opts.includeDescription && description) {
+    out.description = description;
+  }
+  if (extractedFeatures) {
+    out.extracted_features = extractedFeatures;
+  }
+
+  return out;
 }
 
 export function registerPropertyTools(
@@ -300,7 +343,7 @@ export function registerPropertyTools(
     {
       title: 'Get homes.com property details',
       description:
-        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, description, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot size, parking, heating/cooling, MLS ID/source, and date posted/modified. Read-only; safe to call repeatedly.",
+        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot size, parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. The raw `description` is omitted by default to save chat-history budget; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Get homes.com property details',
         readOnlyHint: true,
@@ -313,11 +356,20 @@ export function registerPropertyTools(
           .describe(
             'homes.com property detail URL or path (e.g. https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/). Required — pass the `url` field from a homes_search_properties result.'
           ),
+        include_description: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'When true, include the raw listing `description` marketing prose. Default false — the structured `extracted_features` field surfaces the keywords callers usually want; the prose itself is heavy chat-history weight.'
+          ),
       },
     },
-    async ({ url }) => {
+    async ({ url, include_description }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
-      return textResult(format(listing, html));
+      return textResult(
+        format(listing, html, { includeDescription: include_description })
+      );
     }
   );
 }
