@@ -23,10 +23,17 @@ import type {
 
 // Re-export the typed errors so consumers (e.g. healthcheck) can keep
 // importing them from this module rather than reaching into the dep.
+// 0.8.0+: `classifyBridgeError` is the canonical discriminator over the
+// typed-error hierarchy — use it instead of a hand-rolled `instanceof`
+// ladder (the parent/subclass ordering is easy to get wrong, and the
+// helper enforces it once at the dep boundary).
 export {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
   FetchproxyProtocolError,
+  FetchproxyHttpError,
+  classifyBridgeError,
+  type BridgeError,
 } from '@fetchproxy/server';
 
 const DEFAULT_PORT = 37_149;
@@ -97,6 +104,7 @@ export class FetchproxyTransport implements HomesTransport {
       lastFailureAt: health.lastFailureAt,
       lastFailureReason: health.lastFailureReason,
       consecutiveFailures: health.consecutiveFailures,
+      lastExtensionMessageAt: health.lastExtensionMessageAt,
     };
   }
 

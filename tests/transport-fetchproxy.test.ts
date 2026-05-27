@@ -204,6 +204,9 @@ describe('FetchproxyTransport', () => {
       lastFailureAt: 222,
       lastFailureReason: 'oops',
       consecutiveFailures: 3,
+      // 0.8.0+: extension-side liveness signal (any inner frame, not
+      // just successes). Forwarded through unchanged from bridgeHealth().
+      lastExtensionMessageAt: 333,
     });
   });
 
