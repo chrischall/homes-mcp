@@ -29,7 +29,10 @@ interface CompareRow {
 
 interface SummaryRow {
   field: string;
-  values: Array<string | number | null>;
+  // Mirrors per-row values verbatim — no string-coercion / no
+  // JSON-encoding. The summary cell value for `hoa_fee` is the same
+  // type as `row.property.hoa_fee` (#18).
+  values: Array<unknown>;
 }
 
 const SUMMARY_FIELDS: Array<keyof FormattedProperty> = [
@@ -43,6 +46,10 @@ const SUMMARY_FIELDS: Array<keyof FormattedProperty> = [
   'sqft',
   'year_built',
   'status',
+  'hoa_fee',
+  'hoa_monthly_usd',
+  'days_on_market',
+  'price_drop_amount',
 ];
 
 export function buildSummary(rows: CompareRow[]): SummaryRow[] {
@@ -50,11 +57,7 @@ export function buildSummary(rows: CompareRow[]): SummaryRow[] {
     field,
     values: rows.map((r) =>
       r.property
-        ? ((r.property as unknown as Record<string, unknown>)[field] as
-            | string
-            | number
-            | null
-            | undefined) ?? null
+        ? ((r.property as unknown as Record<string, unknown>)[field] ?? null)
         : null
     ),
   }));
@@ -69,7 +72,7 @@ export function registerCompareTools(
     {
       title: 'Compare homes.com properties side-by-side',
       description:
-        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose.",
+        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
       annotations: {
         title: 'Compare homes.com properties side-by-side',
         readOnlyHint: true,
@@ -99,9 +102,16 @@ export function registerCompareTools(
           .describe(
             'When true, include the raw listing `description` marketing prose on each per-property record. Default false.'
           ),
+        include_summary: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'When true, also emit a cross-row `summary` table aligned by field. Default false — the per-row records already carry every summary field, so the table is redundant context weight unless explicitly requested (#18).'
+          ),
       },
     },
-    async ({ targets, include_description }) => {
+    async ({ targets, include_description, include_summary }) => {
       const ts = targets as CompareTarget[];
       const rows: CompareRow[] = await Promise.all(
         ts.map(async (t) => {
@@ -123,12 +133,18 @@ export function registerCompareTools(
           }
         })
       );
-      const summary = buildSummary(rows);
-      return textResult({
+      const payload: {
+        count: number;
+        summary?: SummaryRow[];
+        results: CompareRow[];
+      } = {
         count: rows.length,
-        summary,
         results: rows,
-      });
+      };
+      if (include_summary) {
+        payload.summary = buildSummary(rows);
+      }
+      return textResult(payload);
     }
   );
 }

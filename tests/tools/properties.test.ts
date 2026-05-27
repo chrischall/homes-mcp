@@ -435,4 +435,169 @@ describe('homes_get_property — richer fields', () => {
     expect(p.baths).toBe(3);
     expect(p.year_built).toBe(1955);
   });
+
+  it('always emits portal_url_hyperlink mirroring url (#22)', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.portal_url_hyperlink).toBe(`=HYPERLINK("${p.url}","Homes")`);
+  });
+
+  it('emits days_on_market derived from datePosted (#16)', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(typeof p.days_on_market).toBe('number');
+  });
+
+  it('emits hoa_monthly_usd of 0 when listing shows "No HOA" (#15)', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.hoa_monthly_usd).toBe(0);
+  });
+
+  it('omits address_alternates when no MLS alternates exist (#23)', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      })
+    );
+    expect(p.address_alternates).toBeUndefined();
+  });
+});
+
+describe('homes_get_property — sentinel + alternates pinned via JSON-LD shim', () => {
+  let h: Awaited<ReturnType<typeof createTestHarness>>;
+  const fetch2 = vi.fn();
+  const c = { fetchHtml: fetch2 } as unknown as HomesClient;
+
+  beforeAll(async () => {
+    h = await createTestHarness((s) => registerPropertyTools(s, c));
+  });
+  afterAll(async () => h?.close());
+
+  // Synthesize HTML with the financial section homes.com renders. The
+  // sentinel + alternate cases don't exist in the rich fixture so we
+  // build minimal HTML around each scenario.
+  const htmlWithFinSection = (finText: string, alternates: string[] = []) => {
+    const altHtml = alternates
+      .map((a) => `<span data-unparsed-address="${a}"></span>`)
+      .join('');
+    return `<html><script type="application/ld+json">${JSON.stringify({
+      '@graph': [
+        {
+          '@type': ['RealEstateListing', 'Product'],
+          url: 'https://www.homes.com/property/x/abc/',
+          offers: { price: 500000 },
+          mainEntity: {
+            address: { streetAddress: '123 Main St' },
+          },
+        },
+      ],
+    })}</script><body><h3>Listing and Financial Details</h3><div>${finText}</div>${altHtml}</body></html>`;
+  };
+
+  it('nulls tax_annual when upstream reports $1 sentinel (#17)', async () => {
+    fetch2.mockResolvedValueOnce(htmlWithFinSection('Property Tax: $1. MLS#: AB-1.'));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.tax_annual).toBe(null);
+  });
+
+  it('keeps real tax_annual values intact (#17)', async () => {
+    fetch2.mockResolvedValueOnce(htmlWithFinSection('Property Tax: $4,500.'));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.tax_annual).toBe(4500);
+  });
+
+  it('surfaces tax_is_estimated when the section flags it (#17)', async () => {
+    fetch2.mockResolvedValueOnce(
+      htmlWithFinSection('Property Tax: $4,500 (estimated by county).')
+    );
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.tax_is_estimated).toBe(true);
+  });
+
+  it('normalizes annual HOA to monthly USD (#15)', async () => {
+    fetch2.mockResolvedValueOnce(htmlWithFinSection('HOA Fee: $4,967 annually'));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.hoa_fee).toBe(4967);
+    expect(p.hoa_monthly_usd).toBe(414);
+  });
+
+  it('normalizes "$250 / month" HOA to monthly USD (#15)', async () => {
+    fetch2.mockResolvedValueOnce(htmlWithFinSection('HOA Fee: $250 / month'));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.hoa_fee).toBe(250);
+    expect(p.hoa_monthly_usd).toBe(250);
+  });
+
+  it('emits price_drop_amount + price_drop_percent when previous price is surfaced (#16)', async () => {
+    fetch2.mockResolvedValueOnce(
+      htmlWithFinSection('Previous Price: $550,000. MLS#: X.')
+    );
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.previous_list_price).toBe(550000);
+    expect(p.price_drop_amount).toBe(50000);
+    expect(p.price_drop_percent).toBeCloseTo(9.1, 1);
+  });
+
+  it('surfaces address_alternates from data-unparsed-address when they differ (#23)', async () => {
+    fetch2.mockResolvedValueOnce(
+      htmlWithFinSection('', ['169 Overlook Point Ln', '109 Overlook Point Ln'])
+    );
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.address_alternates).toEqual([
+      '169 Overlook Point Ln',
+      '109 Overlook Point Ln',
+    ]);
+  });
+
+  it('drops alternates that equal the primary address (#23)', async () => {
+    fetch2.mockResolvedValueOnce(htmlWithFinSection('', ['123 Main St']));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.address_alternates).toBeUndefined();
+  });
 });
