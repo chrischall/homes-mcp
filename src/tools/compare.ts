@@ -69,7 +69,7 @@ export function registerCompareTools(
     {
       title: 'Compare homes.com properties side-by-side',
       description:
-        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns a compact summary table aligned by field (address, price, beds/baths, sqft, year built, status) plus the full per-property record. Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent.",
+        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose.",
       annotations: {
         title: 'Compare homes.com properties side-by-side',
         readOnlyHint: true,
@@ -92,15 +92,24 @@ export function registerCompareTools(
           .min(2)
           .max(8)
           .describe('Array of 2–8 properties to compare'),
+        include_description: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'When true, include the raw listing `description` marketing prose on each per-property record. Default false.'
+          ),
       },
     },
-    async ({ targets }) => {
+    async ({ targets, include_description }) => {
       const ts = targets as CompareTarget[];
       const rows: CompareRow[] = await Promise.all(
         ts.map(async (t) => {
           try {
             const { listing, html } = await fetchListingRecord(client, t);
-            const formatted = format(listing, html);
+            const formatted = format(listing, html, {
+              includeDescription: include_description,
+            });
             return {
               property_id: formatted.property_id,
               url: formatted.url,

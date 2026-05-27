@@ -158,7 +158,8 @@ describe('format', () => {
     expect(out.year_built).toBe(1955);
     expect(out.price).toBe(525000);
     expect(out.price_currency).toBe('USD');
-    expect(out.description).toBe('Charming bungalow with hardwood floors.');
+    // description default-off per #13 — see "include_description" coverage below.
+    expect(out.description).toBeUndefined();
     expect(out.date_posted).toBe('2026-05-01T00:00:00Z');
     expect(out.date_modified).toBe('2026-05-20T00:00:00Z');
     expect(out.listing_agent).toEqual({
@@ -286,13 +287,36 @@ describe('homes_get_property — richer fields', () => {
   });
   afterAll(async () => h?.close());
 
-  it('returns description from JSON-LD', async () => {
+  it('omits description by default (#13 — context-savings)', async () => {
     fetch.mockResolvedValueOnce(RICH_FIXTURE);
     const r = await h.callTool('homes_get_property', {
       url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
     });
     const p = parseToolResult<any>(r);
+    expect(p.description).toBeUndefined();
+  });
+
+  it('returns description when include_description: true', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const r = await h.callTool('homes_get_property', {
+      url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+      include_description: true,
+    });
+    const p = parseToolResult<any>(r);
     expect(p.description).toContain('Charming bungalow');
+  });
+
+  it('always populates extracted_features when a description exists (#14)', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const r = await h.callTool('homes_get_property', {
+      url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+    });
+    const p = parseToolResult<any>(r);
+    expect(p.extracted_features).toBeDefined();
+    expect(p.extracted_features).toMatchObject({
+      lake_front: expect.any(Boolean),
+      hot_tub: expect.any(Boolean),
+    });
   });
 
   it('extracts highlights bullets from the Highlights section', async () => {
