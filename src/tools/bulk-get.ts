@@ -37,9 +37,9 @@ export function registerBulkGetTools(
     {
       title: 'Bulk-fetch homes.com properties (structured records only)',
       description:
-        "Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won't fail the whole call). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, and `portal_url_hyperlink`. The raw `description` is omitted by default; opt back in via `include_description: true`. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.",
+        "Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won't fail the whole call). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Bulk-fetch homes.com properties',
+        title: 'Bulk-fetch homes.com properties (structured records only)',
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
