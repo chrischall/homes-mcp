@@ -29,6 +29,8 @@ import { registerMarketTools } from './tools/market.js';
 import { registerSavedTools } from './tools/saved.js';
 import { registerRentVsBuyTools } from './tools/rent-vs-buy.js';
 import { registerByAddressTools } from './tools/by-address.js';
+import { registerBulkGetTools } from './tools/bulk-get.js';
+import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
 
 const VERSION = '0.8.0'; // x-release-please-version
 
@@ -56,6 +58,8 @@ registerMarketTools(server, client);
 registerSavedTools(server, client);
 registerRentVsBuyTools(server);
 registerByAddressTools(server, client);
+registerBulkGetTools(server, client);
+registerResolveAddressesTools(server, client);
 
 console.error(
   `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port ?? 37149}. ` +
