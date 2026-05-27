@@ -39,7 +39,7 @@ export function registerResolveAddressesTools(
     {
       title: 'Bulk-resolve street addresses to homes.com property URLs',
       description:
-        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same resolution path `homes_get_by_address` uses (slugify → fetch the location page → parse JSON-LD; handles both collection-redirect and detail-redirect shapes). Per-row outcomes mirror the singular tool: `{ resolved: true, url, property_id, street_address }` on success, `{ resolved: false, error }` otherwise — one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
+        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same resolution path `homes_get_by_address` uses (slugify → fetch the location page → parse JSON-LD; handles both collection-redirect and detail-redirect shapes). Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address }` on success, `{ resolved: false, error }` otherwise — one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Bulk-resolve street addresses to homes.com property URLs',
         readOnlyHint: true,
