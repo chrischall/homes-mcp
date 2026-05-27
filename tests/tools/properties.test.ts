@@ -601,3 +601,93 @@ describe('homes_get_property — sentinel + alternates pinned via JSON-LD shim',
     expect(p.address_alternates).toBeUndefined();
   });
 });
+
+describe('homes_get_property — bundled history flags (#27)', () => {
+  let h: Awaited<ReturnType<typeof createTestHarness>>;
+  const fetch3 = vi.fn();
+  const c3 = { fetchHtml: fetch3 } as unknown as HomesClient;
+
+  beforeAll(async () => {
+    h = await createTestHarness((s) => registerPropertyTools(s, c3));
+  });
+  afterAll(async () => h?.close());
+
+  // Pull the same fixtures the history tests use so price/tax sections
+  // are realistic.
+  const HISTORY = readFileSync(
+    resolve(__dirname, '../fixtures/history-full.html'),
+    'utf8'
+  );
+  const TAX = readFileSync(
+    resolve(__dirname, '../fixtures/tax-history.html'),
+    'utf8'
+  );
+
+  // Embed a minimal JSON-LD listing alongside the history HTML so format
+  // can run end-to-end.
+  const withListingJsonLd = (extra: string) =>
+    `<html><script type="application/ld+json">${JSON.stringify({
+      '@graph': [
+        {
+          '@type': ['RealEstateListing', 'Product'],
+          url: 'https://www.homes.com/property/x/abc/',
+          offers: { price: 500000 },
+          mainEntity: { address: { streetAddress: '1 Main' } },
+        },
+      ],
+    })}</script>${extra}</html>`;
+
+  it('omits price_history + tax_history by default', async () => {
+    fetch3.mockResolvedValueOnce(withListingJsonLd(HISTORY + TAX));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.price_history).toBeUndefined();
+    expect(p.tax_history).toBeUndefined();
+  });
+
+  it('inlines price_history when include_price_history: true', async () => {
+    fetch3.mockResolvedValueOnce(withListingJsonLd(HISTORY));
+    const p = parseToolResult<{
+      price_history?: {
+        listing_events: unknown[];
+        events_normalized: Array<{ type: string }>;
+      };
+    }>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+        include_price_history: true,
+      })
+    );
+    expect(p.price_history).toBeDefined();
+    expect(p.price_history!.listing_events.length).toBeGreaterThan(0);
+    expect(p.price_history!.events_normalized.length).toBeGreaterThan(0);
+  });
+
+  it('inlines tax_history when include_tax_history: true', async () => {
+    fetch3.mockResolvedValueOnce(withListingJsonLd(TAX));
+    const p = parseToolResult<{ tax_history?: Array<{ year: number }> }>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+        include_tax_history: true,
+      })
+    );
+    expect(p.tax_history).toBeDefined();
+    expect(p.tax_history!.length).toBeGreaterThan(0);
+  });
+
+  it('inlines both when both flags are true', async () => {
+    fetch3.mockResolvedValueOnce(withListingJsonLd(HISTORY + TAX));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+        include_price_history: true,
+        include_tax_history: true,
+      })
+    );
+    expect(p.price_history).toBeDefined();
+    expect(p.tax_history).toBeDefined();
+  });
+});

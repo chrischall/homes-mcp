@@ -248,3 +248,50 @@ describe('homes_get_tax_history tool', () => {
     expect(p.records[0].year).toBe(2025);
   });
 });
+
+describe('homes_get_history (combined) tool — #31', () => {
+  let hc: Awaited<ReturnType<typeof createTestHarness>>;
+  const fetch3 = vi.fn();
+  const c3 = { fetchHtml: fetch3 } as unknown as HomesClient;
+
+  beforeAll(async () => {
+    hc = await createTestHarness((s) => registerHistoryTools(s, c3));
+  });
+  afterAll(async () => hc?.close());
+
+  it('returns price + tax in one call', async () => {
+    // FULL has price/ownership/lien sections; TAX has tax. Combining
+    // them in one HTML payload simulates a real listing page.
+    fetch3.mockResolvedValueOnce(FULL + TAX);
+    const r = await hc.callTool('homes_get_history', {
+      url: 'https://www.homes.com/property/x/abc123/',
+    });
+    expect(r.isError).toBeFalsy();
+    const p = parseToolResult<{
+      listing_events: unknown[];
+      ownership_events: unknown[];
+      lien_events: unknown[];
+      events_normalized: Array<{ type: string }>;
+      tax_records: Array<{ year: number }>;
+    }>(r);
+    expect(p.listing_events.length).toBeGreaterThan(0);
+    expect(p.ownership_events.length).toBeGreaterThan(0);
+    expect(p.lien_events.length).toBeGreaterThan(0);
+    expect(p.events_normalized.length).toBeGreaterThan(0);
+    expect(p.tax_records.length).toBeGreaterThan(0);
+  });
+
+  it('returns empty series for a listing with no history sections', async () => {
+    fetch3.mockResolvedValueOnce(EMPTY);
+    const p = parseToolResult<{
+      listing_events: unknown[];
+      tax_records: unknown[];
+    }>(
+      await hc.callTool('homes_get_history', {
+        url: 'https://www.homes.com/property/x/empty/',
+      })
+    );
+    expect(p.listing_events).toEqual([]);
+    expect(p.tax_records).toEqual([]);
+  });
+});

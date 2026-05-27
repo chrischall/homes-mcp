@@ -33,6 +33,7 @@ const EXPECTED_TOOLS = [
   'homes_healthcheck',
   'homes_get_property_history',
   'homes_get_tax_history',
+  'homes_get_history',
   'homes_get_nearby_listings',
   'homes_get_market_report',
   'homes_get_saved_homes',
