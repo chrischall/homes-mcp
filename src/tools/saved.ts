@@ -128,7 +128,7 @@ export function registerSavedTools(
     {
       title: "Get the signed-in user's saved homes on homes.com",
       description:
-        "The signed-in user's saved (favorited) homes on homes.com. Scrapes /customer/dashboard/favorites/. Returns `{ count, homes: [{ property_id, url, address?, price?, beds?, baths?, sqft?, status? }] }`. Requires the user to be signed in (the fetchproxy bridge handles auth automatically). Read-only; safe to call repeatedly.",
+        "The signed-in user's saved (favorited) homes on homes.com. Scrapes /customer/dashboard/favorites/. Returns `{ count, homes: [{ property_id, url, address?, price?, beds?, baths?, sqft?, status? }] }`. REQUIRES the user to be signed into homes.com in their browser tab — if not, the request throws SessionNotAuthenticatedError. Card fields (price/beds/baths/sqft) are best-effort DOM scrapes — they may be missing on some card variants; treat absence as 'not surfaced on the saved-homes card', not 'no value'. Call `homes_get_property(url)` per row when you need the canonical record. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Get the signed-in user's saved homes on homes.com",
         readOnlyHint: true,
@@ -150,7 +150,7 @@ export function registerSavedTools(
     {
       title: "Get the signed-in user's saved searches on homes.com",
       description:
-        "The signed-in user's saved searches on homes.com. Scrapes /customer/dashboard/saved-searches/. Returns `{ count, searches: [{ name?, url, filters? }] }`. Requires the user to be signed in. Read-only; safe to call repeatedly.",
+        "The signed-in user's saved searches on homes.com. Scrapes /customer/dashboard/saved-searches/. Returns `{ count, searches: [{ name?, url, filters? }] }`. REQUIRES the user to be signed into homes.com in their browser tab — if not, the request throws SessionNotAuthenticatedError. `name` and `filters` are DOM-scraped from the saved-search card; absence means homes.com didn't render them, not that the search has none. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Get the signed-in user's saved searches on homes.com",
         readOnlyHint: true,

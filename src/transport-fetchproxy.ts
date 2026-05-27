@@ -40,6 +40,12 @@ const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 const DEFAULT_PORT = 37_149;
 
+// #29 lazy-revive: when the SW is content_script_unreachable, wait
+// briefly and retry once. The inbound message itself usually wakes the
+// SW; 2s gives the extension time to bind its message listener again
+// before we ask. Configurable via constructor opt for tests.
+const DEFAULT_BRIDGE_REVIVAL_DELAY_MS = 2_000;
+
 const DEBUG = process.env.HOMES_DEBUG === '1';
 
 function log(...args: unknown[]): void {
@@ -71,10 +77,11 @@ export class FetchproxyBridgeDownError extends Error {
     const hint =
       `the fetchproxy browser extension's service worker is not ` +
       `responding ("${args.originalError}"). Chrome evicts extension ` +
-      `service workers after ~30s idle by default. Wake it by clicking ` +
-      `the fetchproxy extension icon (or by opening any homes.com tab ` +
-      `and reloading), then retry. If it keeps happening, the extension ` +
-      `may need to be reloaded from chrome://extensions.`;
+      `service workers after ~30s idle by default, and homes-mcp has ` +
+      `already retried once with a short delay (lazy-revive). To wake ` +
+      `the SW manually, click the fetchproxy extension icon in your ` +
+      `browser toolbar, or open chrome://extensions and reload the ` +
+      `fetchproxy extension. Then retry the tool call.`;
     super(
       `fetchproxy bridge down: ${args.url} after ${args.elapsedMs}ms ` +
         `(role=${args.role ?? 'null'} port=${args.port}). ${hint}`
@@ -138,11 +145,18 @@ export interface FetchproxyTransportOptions {
   version: string;
   /** Per-request timeout in ms. Default 30s. */
   fetchTimeoutMs?: number;
+  /**
+   * Delay before the SW lazy-revive retry fires (#29). The first
+   * inbound request usually wakes the SW; this delay gives the
+   * extension time to re-bind its message listener. Default 2s.
+   */
+  bridgeRevivalDelayMs?: number;
 }
 
 export class FetchproxyTransport implements HomesTransport {
   private readonly inner: FetchproxyServer;
   private readonly fetchTimeoutMs: number;
+  private readonly bridgeRevivalDelayMs: number;
   private readonly port: number;
   private readonly serverVersion: string;
   // Freshness counters surfaced through `status()` so `homes_healthcheck`
@@ -165,6 +179,8 @@ export class FetchproxyTransport implements HomesTransport {
     };
     this.inner = new FetchproxyServer(options);
     this.fetchTimeoutMs = opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+    this.bridgeRevivalDelayMs =
+      opts.bridgeRevivalDelayMs ?? DEFAULT_BRIDGE_REVIVAL_DELAY_MS;
   }
 
   async start(): Promise<void> {
@@ -215,6 +231,44 @@ export class FetchproxyTransport implements HomesTransport {
     const url = init.path.startsWith('http')
       ? init.path
       : `${HOMES_ORIGIN}${init.path}`;
+
+    // #29: try once; on content_script_unreachable, wait briefly +
+    // try again. Most "first call after Chrome evicted the SW" cases
+    // heal on the second attempt because the message itself wakes
+    // the SW. Failures of any other kind (no_tab, tab_fetch_failed,
+    // timeout) skip the retry — they're not SW-eviction failures.
+    const first = await this.attemptFetch(url, init);
+    if (first.kind === 'ok') return first.value;
+    if (first.kind === 'sw_down') {
+      log('fetch:sw-down — waiting then retrying once', {
+        url,
+        delayMs: this.bridgeRevivalDelayMs,
+      });
+      await sleep(this.bridgeRevivalDelayMs);
+      const second = await this.attemptFetch(url, init);
+      if (second.kind === 'ok') return second.value;
+      // Both attempts came back unreachable / errored — surface the
+      // typed bridge-down error from the second attempt's diagnostics.
+      throw second.error;
+    }
+    throw first.error;
+  }
+
+  /**
+   * Single attempt — returns either an ok-result, a sw_down marker
+   * (carrying the error to throw if no retry is possible), or a
+   * generic error for any other failure (timeout, transport, ok:false
+   * with a different kind). The caller in `fetch()` decides whether
+   * to retry.
+   */
+  private async attemptFetch(
+    url: string,
+    init: FetchInit
+  ): Promise<
+    | { kind: 'ok'; value: FetchResult }
+    | { kind: 'sw_down'; error: Error }
+    | { kind: 'error'; error: Error }
+  > {
     const start = Date.now();
     log('fetch:start', {
       method: init.method,
@@ -229,10 +283,6 @@ export class FetchproxyTransport implements HomesTransport {
       headers: init.headers,
       body: init.body,
     });
-    // Attach a no-op rejection handler up front so a WS drop or other
-    // late failure on `inner` — arriving AFTER the race already settled
-    // on the timeout side — doesn't become an unhandled rejection that
-    // crashes the MCP server in Node ≥15.
     inner.catch(() => {});
     let timer: ReturnType<typeof setTimeout> | undefined;
     let result;
@@ -255,6 +305,9 @@ export class FetchproxyTransport implements HomesTransport {
           }, this.fetchTimeoutMs);
         }),
       ]);
+    } catch (e) {
+      // Timeouts surface as throws from the race; pass them up.
+      return { kind: 'error', error: e as Error };
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -262,25 +315,22 @@ export class FetchproxyTransport implements HomesTransport {
     if (!result.ok) {
       log('fetch:bridge-error', { url, elapsed, error: result.error });
       this.recordFailure(result.error);
-      // @fetchproxy/server 0.5.0+ classifies the extension-side error
-      // into a discriminated `kind` (`'content_script_unreachable'`,
-      // `'no_tab'`, `'tab_fetch_failed'`, …). We surface the SW-
-      // unreachable case as a typed FetchproxyBridgeDownError so
-      // callers + homes_healthcheck can give actionable hints.
-      // Earlier homes-mcp versions did string-regex matching on the
-      // raw error; the kind field is the source of truth as of 0.5.0.
       if (result.kind === 'content_script_unreachable') {
-        throw new FetchproxyBridgeDownError({
+        const err = new FetchproxyBridgeDownError({
           url,
           elapsedMs: elapsed,
           role: this.inner.role,
           port: this.port,
           originalError: result.error,
         });
+        return { kind: 'sw_down', error: err };
       }
-      throw new Error(
-        `fetchproxy transport error after ${elapsed}ms (role=${this.inner.role ?? 'null'}): ${result.error}`
-      );
+      return {
+        kind: 'error',
+        error: new Error(
+          `fetchproxy transport error after ${elapsed}ms (role=${this.inner.role ?? 'null'}): ${result.error}`
+        ),
+      };
     }
     log('fetch:done', {
       url,
@@ -289,6 +339,13 @@ export class FetchproxyTransport implements HomesTransport {
       bodyLen: result.body.length,
     });
     this.recordSuccess();
-    return { status: result.status, body: result.body, url: result.url };
+    return {
+      kind: 'ok',
+      value: { status: result.status, body: result.body, url: result.url },
+    };
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

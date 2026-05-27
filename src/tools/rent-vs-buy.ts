@@ -183,7 +183,7 @@ export function registerRentVsBuyTools(server: McpServer): void {
     {
       title: 'Project cumulative buy-vs-rent cost over N years',
       description:
-        'Project the cumulative cost of buying a home versus renting a comparable place over N years. Accounts for down payment, closing costs, monthly PITI, maintenance (~1%/yr default), appreciation (~3%/yr default), rent growth (~3%/yr default), and the opportunity cost of the down payment (renter invests it at investment_return_rate, default 6%/yr). Returns year-by-year cumulative costs, break-even year, and the net difference at horizon. No network — pure local math. Same math contract as zillow_estimate_rent_vs_buy.',
+        'Project the cumulative cost of buying a home versus renting a comparable place over N years. Accounts for down payment, closing costs, monthly PITI, maintenance (~1%/yr default), appreciation (~3%/yr default), rent growth (~3%/yr default), and the opportunity cost of the down payment (renter invests it at investment_return_rate, default 6%/yr). Returns year-by-year cumulative costs, break-even year, and the net difference at horizon. No network — pure local math. Same math contract as zillow_estimate_rent_vs_buy. NOTE: caller must supply `monthly_rent` — homes.com does not publish rental estimates anywhere on its consumer site (no rent_zestimate analogue, no comparable-rentals endpoint). For a rent estimate to plug in here, use `zillow_get_property` (its `rent_zestimate` field) or `redfin_get_comparable_rentals`.',
       annotations: {
         title: 'Project cumulative buy-vs-rent cost over N years',
         readOnlyHint: true,

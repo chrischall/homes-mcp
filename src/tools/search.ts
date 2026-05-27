@@ -317,7 +317,7 @@ export function registerSearchTools(
     {
       title: 'Search homes.com listings',
       description:
-        "Search homes.com listings by free-text location (city, ZIP, neighborhood). Optionally filter by property_type (single_family/condo/townhouse/land/mobile/multi_family), listing_type (for_sale/sold/for_rent/open_houses/new_construction), and sort (newest). Slugifies the location into homes.com's URL routing (e.g. 'Atlanta, GA' + condo + for_sale → /atlanta-ga/condos-for-sale/). Parses the embedded Schema.org JSON-LD to return each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage, and the homes.com property URL. Read-only; safe to call repeatedly.",
+        "Search homes.com listings by free-text location (city, ZIP, neighborhood). Optionally filter by property_type (single_family/condo/townhouse/land/mobile/multi_family), listing_type (for_sale/sold/for_rent/open_houses/new_construction), and sort (newest). Slugifies the location into homes.com's URL routing (e.g. 'Atlanta, GA' + condo + for_sale → /atlanta-ga/condos-for-sale/). Parses the embedded Schema.org JSON-LD to return each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage, and the homes.com property URL. KNOWN CAP: homes.com server-renders ~40 listings per page; the response carries `truncated: true` + `total_estimated` when the market has more. To enumerate a busy market, price-band or sub-area your search until each segment fits under the cap. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Search homes.com listings',
         readOnlyHint: true,
@@ -335,7 +335,9 @@ export function registerSearchTools(
           .int()
           .positive()
           .optional()
-          .describe('Max listings to return (default 40, the search-page size).'),
+          .describe(
+            'Max listings to return (default 40, which is also the homes.com SSR page size). Passing >40 will still cap at the page size; the response will set `truncated: true` and `total_estimated` to homes.com\'s reported total.'
+          ),
         property_type: z
           .enum([
             'single_family',
@@ -377,12 +379,29 @@ export function registerSearchTools(
         .map(formatHome)
         .filter((h): h is FormattedHome => h !== null)
         .slice(0, limit);
-      return textResult({
+      // #25: homes.com SSRs ~40 listings per page even when its
+      // numberOfItems counter reports more. Signal the slice explicitly
+      // so callers can tell "all results" from "page 1 of many".
+      const truncated =
+        typeof total === 'number' && total > formatted.length;
+      const payload: {
+        search_path: string;
+        total_items: number | undefined;
+        count: number;
+        truncated: boolean;
+        total_estimated?: number;
+        results: FormattedHome[];
+      } = {
         search_path: path,
         total_items: total,
         count: formatted.length,
+        truncated,
         results: formatted,
-      });
+      };
+      if (truncated && typeof total === 'number') {
+        payload.total_estimated = total;
+      }
+      return textResult(payload);
     }
   );
 }

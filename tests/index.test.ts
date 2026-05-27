@@ -18,6 +18,8 @@ import { registerRentVsBuyTools } from '../src/tools/rent-vs-buy.js';
 import { registerByAddressTools } from '../src/tools/by-address.js';
 import { SessionRegistry } from '../src/sessions.js';
 import { registerSessionsTools } from '../src/tools/sessions.js';
+import { registerBulkGetTools } from '../src/tools/bulk-get.js';
+import { registerResolveAddressesTools } from '../src/tools/resolve-addresses.js';
 import { createTestHarness } from './helpers.js';
 
 const mockClient = {
@@ -35,6 +37,7 @@ const EXPECTED_TOOLS = [
   'homes_healthcheck',
   'homes_get_property_history',
   'homes_get_tax_history',
+  'homes_get_history',
   'homes_get_nearby_listings',
   'homes_get_market_report',
   'homes_get_saved_homes',
@@ -44,6 +47,8 @@ const EXPECTED_TOOLS = [
   'homes_get_session_context',
   'homes_register_session',
   'homes_set_active_session',
+  'homes_bulk_get',
+  'homes_resolve_addresses',
 ];
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
@@ -68,6 +73,8 @@ describe('tool registration', () => {
       registerRentVsBuyTools(server);
       registerByAddressTools(server, mockClient);
       registerSessionsTools(server, new SessionRegistry());
+      registerBulkGetTools(server, mockClient);
+      registerResolveAddressesTools(server, mockClient);
     });
     const tools = await harness.listTools();
     const names = tools.map((t) => t.name).sort();

@@ -111,6 +111,7 @@ describe('FetchproxyTransport', () => {
     const t = new FetchproxyTransport({
       version: '0.0.0',
       port: 37200,
+      bridgeRevivalDelayMs: 1,
     });
     const inner = stubInner('peer');
     inner.fetch.mockResolvedValue({
@@ -142,7 +143,11 @@ describe('FetchproxyTransport', () => {
     // @fetchproxy/server's typed `kind` field, not by regex on `error`.
     // So even if the message text is unrecognizable, a server-classified
     // content_script_unreachable still routes to the bridge-down error.
-    const t = new FetchproxyTransport({ version: '0.0.0' });
+    // Both attempts (#29 lazy-revive) come back unreachable -> bridge-down.
+    const t = new FetchproxyTransport({
+      version: '0.0.0',
+      bridgeRevivalDelayMs: 1,
+    });
     const inner = stubInner();
     inner.fetch.mockResolvedValue({
       ok: false,
@@ -381,5 +386,127 @@ describe('FetchproxyTransport', () => {
     const inner = stubInner(null);
     installInner(t, inner);
     expect(t.status().role).toBeNull();
+  });
+
+  // SW eviction handling (#29): the extension's service worker dies
+  // after ~30s idle. A single retry with a short delay gives the SW
+  // time to wake on the inbound message, so most "first call after a
+  // pause" failures heal silently.
+  describe('lazy-revive retry on content_script_unreachable (#29)', () => {
+    it('retries ONCE on content_script_unreachable and surfaces the second result', async () => {
+      const t = new FetchproxyTransport({
+        version: '0.0.0',
+        bridgeRevivalDelayMs: 1, // collapse the wait so the test stays fast
+      });
+      const inner = stubInner('host');
+      inner.fetch
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'Could not establish connection. Receiving end does not exist.',
+          kind: 'content_script_unreachable',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: 'revived',
+          url: 'https://www.homes.com/x',
+        });
+      installInner(t, inner);
+      const result = await t.fetch({ path: '/x', method: 'GET' });
+      expect(result.body).toBe('revived');
+      expect(inner.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws FetchproxyBridgeDownError when BOTH attempts return content_script_unreachable', async () => {
+      const t = new FetchproxyTransport({
+        version: '0.0.0',
+        bridgeRevivalDelayMs: 1,
+      });
+      const inner = stubInner('host');
+      inner.fetch.mockResolvedValue({
+        ok: false,
+        error: 'Could not establish connection.',
+        kind: 'content_script_unreachable',
+      });
+      installInner(t, inner);
+      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
+        FetchproxyBridgeDownError
+      );
+      // Confirm we DID retry — not a silent no-retry path masquerading.
+      expect(inner.fetch).toHaveBeenCalledTimes(2);
+      // Counter is attempt-level, not call-level: two transport attempts
+      // produce two recordFailure() calls within a single logical fetch().
+      expect(t.status().consecutiveFailures).toBe(2);
+    });
+
+    it('surfaces the second attempt error type when sw_down retry hits a different failure (timeout on retry)', async () => {
+      // Documents that on sw_down → error sequences the caller sees the
+      // second attempt's error type (e.g. timeout) rather than always
+      // FetchproxyBridgeDownError. Pin this so a future refactor doesn't
+      // silently start coalescing the second leg into a bridge-down error.
+      const t = new FetchproxyTransport({
+        version: '0.0.0',
+        bridgeRevivalDelayMs: 1,
+        fetchTimeoutMs: 25,
+      });
+      const inner = stubInner('host');
+      inner.fetch
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'Could not establish connection.',
+          kind: 'content_script_unreachable',
+        })
+        // Second attempt: simulate a hung retry (SW is mid-revival, still
+        // doesn't respond before the deadline).
+        .mockReturnValueOnce(new Promise(() => {}));
+      installInner(t, inner);
+      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
+        FetchproxyTimeoutError
+      );
+      expect(inner.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry on non-SW failure kinds (no_tab passes through to a generic Error)', async () => {
+      const t = new FetchproxyTransport({
+        version: '0.0.0',
+        bridgeRevivalDelayMs: 1,
+      });
+      const inner = stubInner('host');
+      inner.fetch.mockResolvedValue({
+        ok: false,
+        error: 'no homes.com tab open',
+        kind: 'no_tab',
+      });
+      installInner(t, inner);
+      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toThrow(
+        /no homes\.com tab open/
+      );
+      // Only one call — no_tab is not a transient SW failure.
+      expect(inner.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('exposes consecutiveFailures: 0 on a successful retry (revival counts as success)', async () => {
+      const t = new FetchproxyTransport({
+        version: '0.0.0',
+        bridgeRevivalDelayMs: 1,
+      });
+      const inner = stubInner('host');
+      inner.fetch
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'Could not establish connection.',
+          kind: 'content_script_unreachable',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          body: 'ok',
+          url: 'https://www.homes.com/x',
+        });
+      installInner(t, inner);
+      await t.fetch({ path: '/x', method: 'GET' });
+      expect(t.status().consecutiveFailures).toBe(0);
+      expect(t.status().lastSuccessAt).not.toBeNull();
+    });
   });
 });

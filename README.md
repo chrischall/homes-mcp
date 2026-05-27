@@ -16,6 +16,12 @@ homes.com real-estate access as an MCP server for Claude — search listings, fe
 | `homes_calculate_mortgage` | Local PITI calculator — principal+interest, taxes, insurance, HOA, PMI. No network. |
 | `homes_healthcheck` | Round-trips `/robots.txt` through the fetchproxy bridge and returns diagnostics + a plain-English hint distinguishing "bridge down" from "extension not connected" from "homes.com-side problem." |
 
+### Known data gap: rental estimates
+
+homes.com does NOT publish rental estimates anywhere on its consumer site — there's no `rent_zestimate` analogue, no "estimated rent" widget on property detail pages, and no comparable-rentals endpoint. The `homes_estimate_rent_vs_buy` tool exists for the math, but it requires the caller to pass `monthly_rent` directly (you can't fetch a rent estimate from homes.com to plug in).
+
+For rental signals, use a sibling MCP: **`zillow_get_property`** carries `rent_zestimate` on detail records, and **`redfin_get_comparable_rentals`** returns rental comps by URL. See [issue #28](https://github.com/chrischall/homes-mcp/issues/28) for the feasibility investigation.
+
 ## Acknowledgement of Terms
 
 By using this MCP server, you acknowledge and agree to the following:

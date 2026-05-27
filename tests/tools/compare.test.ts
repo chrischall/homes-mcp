@@ -95,6 +95,79 @@ describe('homes_compare_properties tool', () => {
     ]);
   });
 
+  it('omits summary by default (#18 — opt-in)', async () => {
+    let n = 0;
+    mockFetchHtml.mockImplementation(async () => {
+      n++;
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        url: `https://www.homes.com/property/foo/id-${n}/`,
+        offers: { price: n * 100_000 },
+        mainEntity: { address: { streetAddress: `${n} Main` } },
+      });
+    });
+
+    const r = await harness.callTool('homes_compare_properties', {
+      targets: [{ url: '/property/foo/a/' }, { url: '/property/foo/b/' }],
+    });
+    const parsed = parseToolResult<{ summary?: unknown; results: unknown[] }>(r);
+    expect(parsed.summary).toBeUndefined();
+    expect(parsed.results).toHaveLength(2);
+  });
+
+  it('emits summary when include_summary: true', async () => {
+    let n = 0;
+    mockFetchHtml.mockImplementation(async () => {
+      n++;
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        url: `https://www.homes.com/property/foo/id-${n}/`,
+        offers: { price: n * 100_000 },
+        mainEntity: { address: { streetAddress: `${n} Main` } },
+      });
+    });
+
+    const r = await harness.callTool('homes_compare_properties', {
+      targets: [{ url: '/property/foo/a/' }, { url: '/property/foo/b/' }],
+      include_summary: true,
+    });
+    const parsed = parseToolResult<{
+      summary: Array<{ field: string; values: unknown[] }>;
+    }>(r);
+    expect(parsed.summary).toBeDefined();
+    const price = parsed.summary.find((r) => r.field === 'price')!;
+    expect(price.values).toEqual([100_000, 200_000]);
+  });
+
+  it('summary hoa_fee values mirror the per-row property.hoa_fee shape (#18)', async () => {
+    // The two cells for `hoa_fee` in the summary should equal the
+    // per-row `property.hoa_fee` — same type, same null-vs-number
+    // representation. The fixture has no HOA section so both rows
+    // null out.
+    let n = 0;
+    mockFetchHtml.mockImplementation(async () => {
+      n++;
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        url: `https://www.homes.com/property/foo/id-${n}/`,
+        offers: { price: 100_000 },
+        mainEntity: { address: { streetAddress: `${n} Main` } },
+      });
+    });
+    const r = await harness.callTool('homes_compare_properties', {
+      targets: [{ url: '/property/foo/a/' }, { url: '/property/foo/b/' }],
+      include_summary: true,
+    });
+    const parsed = parseToolResult<{
+      summary: Array<{ field: string; values: unknown[] }>;
+      results: Array<{ property: Record<string, unknown> }>;
+    }>(r);
+    const hoaSummary = parsed.summary.find((s) => s.field === 'hoa_fee')!;
+    expect(hoaSummary.values).toEqual(
+      parsed.results.map((row) => row.property.hoa_fee ?? null)
+    );
+  });
+
   it('captures per-target errors without failing the whole call', async () => {
     let n = 0;
     mockFetchHtml.mockImplementation(async () => {
