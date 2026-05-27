@@ -282,7 +282,7 @@ export function registerHistoryTools(
     {
       title: 'Get homes.com property tax history (DEPRECATED — use homes_get_history)',
       description:
-        "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_tax_history: true })`. Same data, fewer round trips. Will be removed in a future major version. Year-by-year property-tax records: tax paid, total assessed value, land/improvement split.",
+        "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_tax_history: true })`. Same data, fewer round trips; note that `homes_get_history` returns the tax array as `tax_records` (not `records`). Will be removed in a future major version. Year-by-year property-tax records: tax paid, total assessed value, land/improvement split.",
       annotations: {
         title: 'Get homes.com property tax history (DEPRECATED — use homes_get_history)',
         readOnlyHint: true,
