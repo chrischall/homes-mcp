@@ -3,6 +3,7 @@ import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import {
   FetchproxyBridgeDownError,
+  FetchproxyProtocolError,
   FetchproxyTimeoutError,
 } from '../transport-fetchproxy.js';
 
@@ -127,19 +128,23 @@ export function registerHealthcheckTools(
         ok = true;
       } catch (e) {
         const elapsedMs = Date.now() - start;
+        // role_at_failure comes from the post-probe bridge snapshot now;
+        // 0.8.0's typed errors no longer carry it (the bridge's own
+        // freshness counters are the source of truth).
+        const snapshotRole = client.bridgeStatus().role;
         if (e instanceof FetchproxyTimeoutError) {
           error = {
             kind: 'timeout',
             message: e.message,
-            role_at_failure: e.role,
+            role_at_failure: snapshotRole,
           };
         } else if (e instanceof FetchproxyBridgeDownError) {
           error = {
             kind: 'bridge_down',
             message: e.message,
-            role_at_failure: e.role,
+            role_at_failure: snapshotRole,
           };
-        } else if (e instanceof Error && /fetchproxy transport error/.test(e.message)) {
+        } else if (e instanceof FetchproxyProtocolError) {
           error = { kind: 'transport', message: e.message };
         } else {
           error = {
