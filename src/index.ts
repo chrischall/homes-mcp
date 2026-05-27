@@ -29,6 +29,8 @@ import { registerMarketTools } from './tools/market.js';
 import { registerSavedTools } from './tools/saved.js';
 import { registerRentVsBuyTools } from './tools/rent-vs-buy.js';
 import { registerByAddressTools } from './tools/by-address.js';
+import { SessionRegistry } from './sessions.js';
+import { registerSessionsTools } from './tools/sessions.js';
 import { registerBulkGetTools } from './tools/bulk-get.js';
 import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
 
@@ -58,6 +60,8 @@ registerMarketTools(server, client);
 registerSavedTools(server, client);
 registerRentVsBuyTools(server);
 registerByAddressTools(server, client);
+const sessions = new SessionRegistry();
+registerSessionsTools(server, sessions);
 registerBulkGetTools(server, client);
 registerResolveAddressesTools(server, client);
 

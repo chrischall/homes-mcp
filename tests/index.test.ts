@@ -16,6 +16,8 @@ import { registerMarketTools } from '../src/tools/market.js';
 import { registerSavedTools } from '../src/tools/saved.js';
 import { registerRentVsBuyTools } from '../src/tools/rent-vs-buy.js';
 import { registerByAddressTools } from '../src/tools/by-address.js';
+import { SessionRegistry } from '../src/sessions.js';
+import { registerSessionsTools } from '../src/tools/sessions.js';
 import { registerBulkGetTools } from '../src/tools/bulk-get.js';
 import { registerResolveAddressesTools } from '../src/tools/resolve-addresses.js';
 import { createTestHarness } from './helpers.js';
@@ -42,6 +44,9 @@ const EXPECTED_TOOLS = [
   'homes_get_saved_searches',
   'homes_estimate_rent_vs_buy',
   'homes_get_by_address',
+  'homes_get_session_context',
+  'homes_register_session',
+  'homes_set_active_session',
   'homes_bulk_get',
   'homes_resolve_addresses',
 ];
@@ -67,6 +72,7 @@ describe('tool registration', () => {
       registerSavedTools(server, mockClient);
       registerRentVsBuyTools(server);
       registerByAddressTools(server, mockClient);
+      registerSessionsTools(server, new SessionRegistry());
       registerBulkGetTools(server, mockClient);
       registerResolveAddressesTools(server, mockClient);
     });
