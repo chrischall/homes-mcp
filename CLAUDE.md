@@ -25,7 +25,7 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_get_market_report` | `tools/market.ts` | `GET /<city-slug>/sold/` — derive median/avg from JSON-LD itemListElement | read |
 | `homes_get_saved_homes` | `tools/saved.ts` | `GET /customer/dashboard/favorites/` — auth-gated DOM scrape | read (auth) |
 | `homes_get_saved_searches` | `tools/saved.ts` | `GET /customer/dashboard/saved-searches/` — auth-gated DOM scrape | read (auth) |
-| `homes_estimate_rent_vs_buy` | `tools/rent-vs-buy.ts` | (local; no network) | read |
+| `homes_estimate_rent_vs_buy` | `tools/rent-vs-buy.ts` | (local; no network — caller supplies `monthly_rent`; homes.com has no rental signal — see "Rental data gap" below) | read |
 | `homes_get_by_address` | `tools/by-address.ts` | `GET /<address-slug>/` SSR — pick first `CollectionPage.mainEntity.itemListElement[0]` (or single `RealEstateListing` if homes.com redirects to detail). Returns `{ resolved: false, error }` on miss. | read |
 
 ## Architecture
@@ -121,6 +121,7 @@ HOMES_WS_PORT=37149   # override the fetchproxy WebSocket port
 - **JSON-LD `@id` carries a `#realestatelisting` fragment.** Every id-extractor prefers `url` over `@id` and strips both `?query` AND `#fragment` before taking the last path segment.
 - **History/tax tables use `<th scope="row">` for the leading cell.** Every row's date/year column is `<th>`, the rest are `<td>`. `tableRows()` in `src/html.ts` collects both. Header cells (`tableHeaderCells`) are scoped to `<thead>` only so tbody-th cells aren't confused with column headers.
 - **Sign-in detection.** `src/client.ts::throwIfSignInPage` flags `/sign-in` URL redirects and the AWS WAF challenge interstitial (body matches both `awswaf.com` AND `challenge.js` AND body < 80 KB). CoStar (homes.com's parent) sits behind AWS WAF.
+- **Rental data gap.** homes.com does NOT publish rental estimates — no `rent_zestimate` analogue on detail pages, no comparable-rentals widget, no "Estimated Rent" range. The for-rent search URL space exists (`/homes-for-rent/`, `/<type>-for-rent/`) but only lists rental listings; it doesn't impute rent for an arbitrary sale listing. `homes_estimate_rent_vs_buy` therefore requires the caller to supply `monthly_rent` directly. For a rent estimate to plug in, use a sibling MCP: `zillow_get_property` carries `rent_zestimate`, and `redfin_get_comparable_rentals` returns rental comps. (Issue #28 feasibility investigation outcome.)
 
 ## Publishing constraints
 
