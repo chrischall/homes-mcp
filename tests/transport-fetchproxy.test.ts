@@ -434,6 +434,36 @@ describe('FetchproxyTransport', () => {
       );
       // Confirm we DID retry — not a silent no-retry path masquerading.
       expect(inner.fetch).toHaveBeenCalledTimes(2);
+      // Counter is attempt-level, not call-level: two transport attempts
+      // produce two recordFailure() calls within a single logical fetch().
+      expect(t.status().consecutiveFailures).toBe(2);
+    });
+
+    it('surfaces the second attempt error type when sw_down retry hits a different failure (timeout on retry)', async () => {
+      // Documents that on sw_down → error sequences the caller sees the
+      // second attempt's error type (e.g. timeout) rather than always
+      // FetchproxyBridgeDownError. Pin this so a future refactor doesn't
+      // silently start coalescing the second leg into a bridge-down error.
+      const t = new FetchproxyTransport({
+        version: '0.0.0',
+        bridgeRevivalDelayMs: 1,
+        fetchTimeoutMs: 25,
+      });
+      const inner = stubInner('host');
+      inner.fetch
+        .mockResolvedValueOnce({
+          ok: false,
+          error: 'Could not establish connection.',
+          kind: 'content_script_unreachable',
+        })
+        // Second attempt: simulate a hung retry (SW is mid-revival, still
+        // doesn't respond before the deadline).
+        .mockReturnValueOnce(new Promise(() => {}));
+      installInner(t, inner);
+      await expect(t.fetch({ path: '/x', method: 'GET' })).rejects.toBeInstanceOf(
+        FetchproxyTimeoutError
+      );
+      expect(inner.fetch).toHaveBeenCalledTimes(2);
     });
 
     it('does not retry on non-SW failure kinds (no_tab passes through to a generic Error)', async () => {
