@@ -38,6 +38,73 @@ export interface ListingEvent {
   price_per_sqft?: number;
 }
 
+/**
+ * Standard cross-MCP event type enum (#26). Same shape across onehome,
+ * zillow, redfin, compass, homes — so callers can write one normalizer.
+ */
+export type NormalizedEventType =
+  | 'Listed'
+  | 'PriceChange'
+  | 'Pending'
+  | 'Contingent'
+  | 'Sold'
+  | 'Withdrawn'
+  | 'Relisted'
+  | 'Delisted';
+
+export interface NormalizedEvent {
+  date: string;
+  type: NormalizedEventType;
+  price?: number;
+  price_change_pct?: number;
+  dom?: number;
+  source_mls?: string;
+}
+
+/**
+ * Maps homes.com's free-text `event` strings to the cross-MCP enum
+ * (#26). Returns the normalized list, dropping rows that don't map —
+ * unrecognized strings emit a stderr warning so the taxonomy can be
+ * extended once we see them in the wild.
+ */
+export function normalizeEvents(events: ListingEvent[]): NormalizedEvent[] {
+  const out: NormalizedEvent[] = [];
+  for (const e of events) {
+    const type = mapEventType(e.event);
+    if (type === null) {
+      console.error(
+        `[homes-mcp] events_normalized: unrecognized event "${e.event}" — dropped from normalized list`
+      );
+      continue;
+    }
+    const rec: NormalizedEvent = { date: e.date, type };
+    if (typeof e.price === 'number') rec.price = e.price;
+    if (typeof e.list_to_sale_pct === 'number') {
+      rec.price_change_pct = e.list_to_sale_pct;
+    }
+    out.push(rec);
+  }
+  return out;
+}
+
+function mapEventType(eventText: string): NormalizedEventType | null {
+  const t = eventText.toLowerCase().trim();
+  // Order: most-specific → most-general so "price reduced" beats
+  // "reduced" by itself.
+  if (/price\s*(chang(e|ed)|reduc(ed|tion)?|drop(ped)?)|\breduced\b/.test(t)) {
+    return 'PriceChange';
+  }
+  if (/\b(listed|new\s+listing|active|for\s+sale)\b/.test(t)) return 'Listed';
+  if (/\bre[\s-]?listed\b/.test(t)) return 'Relisted';
+  if (/\bpending\b/.test(t)) return 'Pending';
+  if (/\bcontingent\b/.test(t)) return 'Contingent';
+  if (/\bsold\b/.test(t)) return 'Sold';
+  if (/\b(withdrawn|cancell?ed|expired)\b/.test(t)) return 'Withdrawn';
+  // "Off Market" / "Delisted" — homes.com uses both.
+  if (/\b(off\s+market|delisted)\b/.test(t)) return 'Delisted';
+  return null;
+}
+
 export interface OwnershipEvent {
   date: string;
   date_raw?: string;
@@ -183,7 +250,7 @@ export function registerHistoryTools(
     {
       title: 'Get homes.com property history (listings + ownership + liens)',
       description:
-        "Three timelines for a homes.com property in one call: `listing_events` (listings, price changes, sales, off-market), `ownership_events` (deeds — recorded sales between owners), and `lien_events` (mortgage/refi origination + payoff). Pass `url` — the full property detail URL. Each event has an ISO 8601 date plus event-specific fields. Series are `[]` when the listing doesn't carry that section (common for new construction). Read-only; safe to call repeatedly.",
+        "Three timelines for a homes.com property in one call: `listing_events` (listings, price changes, sales, off-market), `ownership_events` (deeds — recorded sales between owners), and `lien_events` (mortgage/refi origination + payoff). Also returns `events_normalized` — `listing_events` mapped onto the cross-MCP event-type enum (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted) so callers can analyse timelines without re-implementing per-source normalizers. Pass `url` — the full property detail URL. Each event has an ISO 8601 date plus event-specific fields. Series are `[]` when the listing doesn't carry that section (common for new construction). Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Get homes.com property history (listings + ownership + liens)',
         readOnlyHint: true,
@@ -198,10 +265,12 @@ export function registerHistoryTools(
       const path = urlToPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
+      const listing_events = parsePropertyHistory(root);
       return textResult({
         property_id: extractPropertyIdFromHtml(html, url),
         url,
-        listing_events: parsePropertyHistory(root),
+        listing_events,
+        events_normalized: normalizeEvents(listing_events),
         ownership_events: parseOwnershipHistory(root),
         lien_events: parseLienHistory(root),
       });

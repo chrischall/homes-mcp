@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import type { HomesClient } from '../../src/client.js';
 import {
+  normalizeEvents,
   parsePropertyHistory,
   parseOwnershipHistory,
   parseLienHistory,
@@ -71,6 +72,75 @@ describe('parseLienHistory', () => {
   });
 });
 
+describe('normalizeEvents (#26)', () => {
+  it('maps "Listed" to Listed', () => {
+    const out = normalizeEvents([
+      { date: '2026-01-01', event: 'Listed', price: 500_000 },
+    ]);
+    expect(out).toEqual([{ date: '2026-01-01', type: 'Listed', price: 500_000 }]);
+  });
+
+  it('maps "Price Changed" / "Price Reduced" to PriceChange', () => {
+    const out = normalizeEvents([
+      { date: '2026-02-01', event: 'Price Changed', price: 480_000 },
+      { date: '2026-02-15', event: 'Price Reduced', price: 460_000 },
+    ]);
+    expect(out.map((e) => e.type)).toEqual(['PriceChange', 'PriceChange']);
+  });
+
+  it('maps "Pending" / "Contingent" / "Sold" / "Withdrawn" / "Off Market" to enum', () => {
+    const out = normalizeEvents([
+      { date: '2026-03-01', event: 'Pending' },
+      { date: '2026-03-05', event: 'Contingent' },
+      { date: '2026-03-10', event: 'Sold' },
+      { date: '2026-03-15', event: 'Withdrawn' },
+      { date: '2026-03-20', event: 'Off Market' },
+    ]);
+    expect(out.map((e) => e.type)).toEqual([
+      'Pending',
+      'Contingent',
+      'Sold',
+      'Withdrawn',
+      'Delisted',
+    ]);
+  });
+
+  it('maps "Relisted" to Relisted', () => {
+    const out = normalizeEvents([{ date: '2026-04-01', event: 'Relisted' }]);
+    expect(out[0].type).toBe('Relisted');
+  });
+
+  it('preserves price + carries price_change_pct when present', () => {
+    const out = normalizeEvents([
+      {
+        date: '2026-05-01',
+        event: 'Price Changed',
+        price: 480_000,
+        list_to_sale_pct: -4.0,
+      },
+    ]);
+    expect(out[0]).toMatchObject({
+      type: 'PriceChange',
+      price: 480_000,
+      price_change_pct: -4.0,
+    });
+  });
+
+  it('drops unmappable rows + emits a stderr warning', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const out = normalizeEvents([
+      { date: '2026-05-01', event: 'Some Unrecognized Action' },
+    ]);
+    expect(out).toEqual([]);
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('unrecognized'));
+    spy.mockRestore();
+  });
+
+  it('handles empty input', () => {
+    expect(normalizeEvents([])).toEqual([]);
+  });
+});
+
 describe('homes_get_property_history tool', () => {
   let h: Awaited<ReturnType<typeof createTestHarness>>;
   const fetch = vi.fn();
@@ -92,6 +162,34 @@ describe('homes_get_property_history tool', () => {
     expect(p.listing_events).toHaveLength(3);
     expect(p.ownership_events).toHaveLength(3);
     expect(p.lien_events).toHaveLength(2);
+  });
+
+  it('emits events_normalized alongside listing_events (#26)', async () => {
+    fetch.mockResolvedValueOnce(FULL);
+    const p = parseToolResult<{
+      listing_events: unknown[];
+      events_normalized: Array<{ date: string; type: string; price?: number }>;
+    }>(
+      await h.callTool('homes_get_property_history', {
+        url: 'https://www.homes.com/property/x/abc123/',
+      })
+    );
+    expect(p.events_normalized).toBeDefined();
+    expect(p.events_normalized.length).toBeGreaterThan(0);
+    // Every normalized entry has a type from the standard enum.
+    const validTypes = new Set([
+      'Listed',
+      'PriceChange',
+      'Pending',
+      'Contingent',
+      'Sold',
+      'Withdrawn',
+      'Relisted',
+      'Delisted',
+    ]);
+    for (const e of p.events_normalized) {
+      expect(validTypes.has(e.type)).toBe(true);
+    }
   });
 
   it('returns three empty arrays for a new-construction-style empty listing', async () => {

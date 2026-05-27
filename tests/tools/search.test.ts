@@ -385,6 +385,45 @@ describe('homes_search_properties tool', () => {
     expect(parsed.results).toHaveLength(3);
   });
 
+  it('marks truncated: true when numberOfItems exceeds returned items (#25)', async () => {
+    // homes.com pages SSR ~40 listings even when numberOfItems reports
+    // more. The tool must signal that the caller is looking at a slice.
+    mockFetchHtml.mockResolvedValueOnce(
+      htmlWith(
+        Array.from({ length: 40 }, (_, i) => itemFor(`p${i}`, 100000 + i * 1000)),
+        200 // numberOfItems claims 200 listings
+      )
+    );
+    const r = await harness.callTool('homes_search_properties', {
+      location: 'Atlanta, GA',
+      limit: 100,
+    });
+    const parsed = parseToolResult<{
+      count: number;
+      total_items: number;
+      truncated: boolean;
+      total_estimated?: number;
+    }>(r);
+    expect(parsed.count).toBe(40);
+    expect(parsed.total_items).toBe(200);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.total_estimated).toBe(200);
+  });
+
+  it('marks truncated: false when all items fit in one page (#25)', async () => {
+    mockFetchHtml.mockResolvedValueOnce(
+      htmlWith(
+        Array.from({ length: 5 }, (_, i) => itemFor(`p${i}`, 100000 + i * 1000)),
+        5
+      )
+    );
+    const r = await harness.callTool('homes_search_properties', {
+      location: 'Atlanta, GA',
+    });
+    const parsed = parseToolResult<{ truncated: boolean }>(r);
+    expect(parsed.truncated).toBe(false);
+  });
+
   it('throws when JSON-LD cannot be located in the HTML', async () => {
     mockFetchHtml.mockResolvedValueOnce('<html>no ld json here</html>');
     const r = await harness.callTool('homes_search_properties', {
