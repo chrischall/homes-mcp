@@ -15,6 +15,13 @@ import {
   loadCommunities,
   type ExtractedFeatures,
 } from '../features.js';
+import {
+  buildPortalUrlHyperlink,
+  computePriceDrop,
+  daysSince,
+  hoaToMonthlyUsd,
+  isTaxSentinel,
+} from '../format.js';
 
 /**
  * homes.com property detail: GET /property/<address-slug>/<propertyId>/
@@ -144,7 +151,19 @@ export interface FormattedProperty {
   matterport_url?: string;
   floorplan_urls?: string[];
   schools?: School[];
+  /**
+   * Raw HOA fee in the units homes.com reported. Kept for back-compat.
+   * Prefer `hoa_monthly_usd` for consistent cross-property math (#15).
+   */
   hoa_fee?: number;
+  /**
+   * HOA cost normalized to monthly USD, rounded. `null` when the
+   * frequency is unknown or no fee is reported. Same field name and
+   * units across the real-estate MCP family (#15).
+   */
+  hoa_monthly_usd?: number | null;
+  /** Raw `frequency` string when the DOM exposed one (e.g. "month", "year"). */
+  hoa_frequency?: string;
   lot_size_sqft?: number;
   lot_size_acres?: number;
   parking?: string;
@@ -152,6 +171,42 @@ export interface FormattedProperty {
   cooling?: string;
   mls_id?: string;
   mls_source?: string;
+  /**
+   * Annual property tax from the homes.com financial section. `null`
+   * when the raw value is a not-yet-assessed sentinel (0 / 1 / sub-$10).
+   * See `tax_is_estimated` for whether it was upstream-marked as a
+   * county estimate vs an actual bill (#17).
+   */
+  tax_annual?: number | null;
+  /** Whether homes.com flagged the tax value as a county estimate (#17). */
+  tax_is_estimated?: boolean;
+  /**
+   * Days since the listing's `datePosted`. `null` when the timestamp is
+   * absent or unparseable (re-lists with no first-list info). (#16.)
+   */
+  days_on_market?: number | null;
+  /**
+   * Previous list price (when surfaced by homes.com). Drives the
+   * `price_drop_*` derivations. (#16.)
+   */
+  previous_list_price?: number;
+  /** `previous_list_price - price`. `null` when either is missing. (#16.) */
+  price_drop_amount?: number | null;
+  /** `(previous - current) / previous * 100`, rounded to 0.1. (#16.) */
+  price_drop_percent?: number | null;
+  /**
+   * Google-Sheets `HYPERLINK` formula pointing at the same listing.
+   * Always present (mirrors `url`). Pasting it into a Sheets cell
+   * renders as a clickable "Homes" link (#22).
+   */
+  portal_url_hyperlink?: string;
+  /**
+   * Alternate address strings from other MLS feeds when they disagree
+   * with the primary address. Omitted when there's nothing to flag
+   * (#23). Helps catch cross-feed mismatches like the live "109 vs
+   * 169 Overlook Point Ln" case.
+   */
+  address_alternates?: string[];
   // P0 context-savings (#13/#14): server-side extracted features lift
   // keyword-parsing work out of the caller. Always present when a
   // description was available upstream; absent when there was no
@@ -295,9 +350,10 @@ export function format(
     ? extractFeatures(description, loadCommunities())
     : undefined;
 
+  const url = listing.url ?? listing['@id'] ?? '';
   const out: FormattedProperty = {
     property_id: extractPropertyId(listing),
-    url: listing.url ?? listing['@id'] ?? '',
+    url,
     name: listing.name,
     address: addr.streetAddress,
     city: addr.addressLocality,
@@ -320,6 +376,42 @@ export function format(
     brokerage: brokerageFrom(agent) ?? offers.seller?.name,
     ...extras,
   };
+
+  // #22: Sheets-paste-ready hyperlink. Always present (mirrors `url`).
+  if (url) {
+    out.portal_url_hyperlink = buildPortalUrlHyperlink(url);
+  }
+
+  // #15: HOA monthly normalization. Both fields surface on every record
+  // so callers can rely on `hoa_monthly_usd` being present (null if no
+  // info) without having to inspect a frequency string.
+  out.hoa_monthly_usd = hoaToMonthlyUsd(out.hoa_fee, out.hoa_frequency);
+
+  // #16: days_on_market + price_drop derivations.
+  out.days_on_market = daysSince(listing.datePosted);
+  const drop = computePriceDrop(out.previous_list_price, out.price);
+  out.price_drop_amount = drop.amount;
+  out.price_drop_percent = drop.percent;
+
+  // #17: Null out tax_annual sentinel placeholders. The flag stays so
+  // callers can tell "no data" apart from "real $0" later.
+  if (isTaxSentinel(out.tax_annual ?? undefined)) {
+    out.tax_annual = null;
+  }
+
+  // #23: Drop alternates that duplicate the primary streetAddress. Keep
+  // only genuinely-different alternates.
+  if (out.address_alternates && out.address) {
+    const primary = out.address.toLowerCase();
+    const filtered = out.address_alternates.filter(
+      (a) => a.toLowerCase() !== primary
+    );
+    if (filtered.length > 0) {
+      out.address_alternates = filtered;
+    } else {
+      delete out.address_alternates;
+    }
+  }
 
   // P0 (#13): omit `description` by default — opt back in with
   // includeDescription: true. The raw text is heavy marketing prose
@@ -428,25 +520,65 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
     out.schools = schoolItems.map(parseSchoolLine);
   }
 
-  // Listing and Financial Details — HOA, MLS, source.
+  // Listing and Financial Details — HOA, MLS, source, tax.
   const finText = findDivTextAfterHeading(root, 'Listing and Financial Details');
   if (finText) {
-    const hoa = /HOA Fee:\s*\$?([0-9,]+|0)/i.exec(finText);
+    // HOA. Capture both the dollar amount AND the trailing frequency
+    // (e.g. "$250 / month", "$4,967 annually") so we can normalize to
+    // monthly USD in format(). See #15.
+    const hoa = /HOA Fee:\s*\$?([0-9,]+|0)\s*(?:\/\s*(year|month|quarter|week)|(annually|monthly|quarterly|weekly|semi-?annually))?/i.exec(
+      finText
+    );
     if (hoa) {
       const n = parseDollar(hoa[1]);
       if (n !== undefined) out.hoa_fee = n;
+      const freq = hoa[2] ?? hoa[3];
+      if (freq) out.hoa_frequency = freq.toLowerCase();
     } else if (/No HOA/i.test(bodyText)) {
       out.hoa_fee = 0;
+      out.hoa_frequency = 'month';
     }
     const mls = /MLS#?:?\s*([A-Z0-9-]+)/i.exec(finText);
     if (mls) out.mls_id = mls[1];
     const src = /Source:\s*([A-Z][A-Za-z0-9 ]+)/.exec(finText);
     if (src) out.mls_source = src[1].trim();
+    // Tax — homes.com surfaces "Annual Tax" / "Property Tax" / "Tax".
+    // Capture the dollar amount; sentinel cleanup happens in format().
+    const tax = /(?:Annual Tax|Property Tax|Tax(?:es)?)(?: Amount)?:?\s*\$?([0-9,]+)/i.exec(
+      finText
+    );
+    if (tax) {
+      const n = parseDollar(tax[1]);
+      if (n !== undefined) out.tax_annual = n;
+    }
+    // Some pages flag the tax value with "(estimated)" / "(est.)" or
+    // "estimated by county". Surface that as #17's tax_is_estimated.
+    if (/tax[^.]{0,40}\b(estimated|est\.|county estimate)\b/i.test(finText)) {
+      out.tax_is_estimated = true;
+    }
+    // Previous list price (when homes.com surfaces a price-history hint
+    // in the financial section). Used to derive price_drop_* (#16).
+    const prev = /(?:Previous(?:ly)?(?: List(?:ed)?)? Price|Was|Originally listed at)\s*:?\s*\$?([0-9,]+)/i.exec(
+      finText
+    );
+    if (prev) {
+      const n = parseDollar(prev[1]);
+      if (n !== undefined) out.previous_list_price = n;
+    }
   }
   // "No HOA" fallback even if no Listing+Financial section.
   if (out.hoa_fee === undefined && /No HOA/i.test(bodyText)) {
     out.hoa_fee = 0;
+    out.hoa_frequency = 'month';
   }
+
+  // #23: Address alternates from MLS data attributes. homes.com pages
+  // sometimes carry a `data-unparsed-address` or list multiple
+  // "MLS Address" rows. We scan for either and surface anything that
+  // disagrees with the primary streetAddress (which the caller already
+  // gets in `address`). Omit the field entirely when no alternates.
+  const alts = collectAddressAlternates(root);
+  if (alts.length > 0) out.address_alternates = alts;
 
   // Lot Details — accept "X acres / Y sqft" or "Y sqft" or "X acres".
   const lotText = findDivTextAfterHeading(root, 'Lot Details');
@@ -530,6 +662,34 @@ function findDivTextAfterHeading(
     }
   }
   return null;
+}
+
+/**
+ * Collect alternate address strings — MLS feeds, prior addresses,
+ * parcel variants. Returns the list dedup'd, in document order. The
+ * primary `streetAddress` (already on the formatted record) is NOT
+ * filtered here; the caller compares against it in format(). See #23.
+ */
+function collectAddressAlternates(root: HTMLElement): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (s: string | undefined): void => {
+    if (!s) return;
+    const v = s.replace(/\s+/g, ' ').trim();
+    if (!v || seen.has(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+  // data-unparsed-address attributes carried on hidden MLS-feed nodes.
+  root
+    .querySelectorAll('[data-unparsed-address]')
+    .forEach((el) => add(el.getAttribute('data-unparsed-address') ?? undefined));
+  // <li> rows under an "MLS Address" or "Alternate Address" heading.
+  const altItems = findUlAfterHeading(root, 'Alternate Address');
+  for (const item of altItems) add(item);
+  const mlsItems = findUlAfterHeading(root, 'MLS Address');
+  for (const item of mlsItems) add(item);
+  return out;
 }
 
 function parseSchoolLine(line: string): School {
