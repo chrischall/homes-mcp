@@ -73,7 +73,7 @@ function hintFor(args: {
   // more-specific bridge_down hint must win over the generic
   // "never bound a role" message in that case.
   if (args.errorKind === 'bridge_down') {
-    return `The fetchproxy browser extension's service worker is not responding. Chrome evicts extension service workers after ~30s idle by default — this looks like that case. Wake it by clicking the fetchproxy extension icon (or opening any homes.com tab and reloading), then retry. If it keeps happening, reload the extension from chrome://extensions.`;
+    return `The fetchproxy browser extension's service worker is not responding even after homes-mcp's automatic lazy-revive retry. Chrome evicts extension service workers after ~30s idle by default. Wake it manually by clicking the fetchproxy extension icon in your browser toolbar, or open chrome://extensions and reload the fetchproxy extension. Then retry.`;
   }
   if (args.role === null) {
     return `The bridge never bound a role. listen() may have failed silently on startup. Check stderr from homes-mcp for an error during start, and confirm port ${37149} isn't blocked.`;
