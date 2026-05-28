@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import type { HomesClient } from '../../src/client.js';
 import {
   buildAddressSearchPath,
@@ -122,7 +122,10 @@ describe('homes_get_by_address tool', () => {
     },
   });
 
-  beforeAll(() => vi.clearAllMocks());
+  // Reset between tests — the fallback rung makes a 2nd fetchHtml call
+  // when the slug rung returns UNRESOLVED, so single-`mockResolvedValueOnce`
+  // tests need a clean queue to avoid leaking prior responses.
+  beforeEach(() => mockFetchHtml.mockReset());
 
   it('hits the address-slug path and resolves to the first listing', async () => {
     mockFetchHtml.mockResolvedValueOnce(
@@ -382,7 +385,6 @@ describe('homes_get_by_address tool', () => {
     });
 
     it('does not call the search fallback when the slug rung resolves', async () => {
-      mockFetchHtml.mockClear();
       mockFetchHtml.mockResolvedValueOnce(
         collectionHtml([itemFor('slughash', '126 Sleeping Bear Ln')])
       );
@@ -394,6 +396,36 @@ describe('homes_get_by_address tool', () => {
       });
       // Only the slug rung was called — no fallback request issued.
       expect(mockFetchHtml).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the fallback fetch when only city is given (no state, no zip) — locality too broad', async () => {
+      // Slug rung — empty / no JSON-LD.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: '',
+      });
+      expect(r.isError).toBeFalsy();
+      // Only the slug rung fired — a bare "Lake Lure" location would
+      // search nationwide for the city name, too noisy to fuzzy-match.
+      expect(mockFetchHtml).toHaveBeenCalledTimes(1);
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
+    });
+
+    it('skips the fallback fetch when only state is given (no city, no zip)', async () => {
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: '',
+        state: 'NC',
+      });
+      expect(r.isError).toBeFalsy();
+      // State-only would yield a state-wide `/nc/` search — too broad.
+      expect(mockFetchHtml).toHaveBeenCalledTimes(1);
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
     });
   });
 });

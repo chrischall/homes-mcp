@@ -163,14 +163,17 @@ export async function resolveOneAddress(
 /**
  * Pick the location string handed to `buildSearchPath` for the fallback
  * rung. Prefer `"city, state"` (matches every other location-based
- * tool); fall back to `zip` if neither is present.
+ * tool); fall back to `zip` if `city + state` are absent.
+ *
+ * City-only or state-only locality shapes are intentionally rejected —
+ * a bare `"NC"` or `"Springfield"` produces a state-wide / ambiguous
+ * search whose results are too broad for the fuzzy matcher to safely
+ * pick from. ZIP-only stays (narrow enough to be useful).
  */
 function buildFallbackLocation(input: ByAddressInput): string | null {
   const city = input.city?.trim();
   const state = input.state?.trim();
   if (city && state) return `${city}, ${state}`;
-  if (city) return city;
-  if (state) return state;
   if (input.zip?.trim()) return input.zip.trim();
   return null;
 }
@@ -250,8 +253,11 @@ function resolveBySearchFallback(
     if (!best || score > best.score) best = { item, score };
   }
 
-  // Require the majority of the input's street tokens to match.
-  if (!best || best.score < 0.5) return UNRESOLVED;
+  // Require a strict majority of the input's street tokens to match.
+  // `<= 0.5` rejects exact-half overlap — for 2-token input like
+  // "Main St", a single common token (e.g. "st") would clear a `< 0.5`
+  // bar and pick an unrelated listing.
+  if (!best || best.score <= 0.5) return UNRESOLVED;
   const hash = extractPropertyId(best.item);
   if (!hash) return UNRESOLVED;
   return {
