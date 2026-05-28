@@ -1,10 +1,11 @@
 // Adapter that lets @fetchproxy/server's FetchproxyServer satisfy
 // homes-mcp's HomesTransport interface.
 //
-// As of @fetchproxy/server 0.8.0, lazy-revive on Chrome MV3 service-
+// As of @fetchproxy/server 0.9.0, lazy-revive on Chrome MV3 service-
 // worker eviction (default 2000ms) and per-request timeouts (default
-// 30000ms) are server defaults — we get them with zero configuration.
-// The convenience `request()` method throws typed
+// 30000ms) are server defaults — we get them with zero configuration,
+// so we only forward those options to the server when the caller
+// overrides them. The convenience `request()` method throws typed
 // `FetchproxyBridgeDownError` / `FetchproxyTimeoutError` on failure
 // (both subclasses of `FetchproxyProtocolError`). Process-wide
 // freshness counters are exposed via `bridgeHealth()` — homes-mcp's
@@ -71,9 +72,13 @@ export class FetchproxyTransport implements HomesTransport {
       version: opts.version,
       // Subdomains of homes.com (www, photos, etc.) match automatically.
       domains: ['homes.com'],
-      fetchTimeoutMs: this.fetchTimeoutMs,
       // fetchproxy#71 — keep SW resident across human-paced session gaps
       keepAliveIntervalMs: 25_000,
+      // 0.9.0 defaults fetchTimeoutMs=30_000 and bridgeReviveDelayMs=2_000,
+      // so only forward overrides when the caller actually supplies one.
+      ...(opts.fetchTimeoutMs !== undefined
+        ? { fetchTimeoutMs: opts.fetchTimeoutMs }
+        : {}),
       ...(opts.bridgeReviveDelayMs !== undefined
         ? { bridgeReviveDelayMs: opts.bridgeReviveDelayMs }
         : {}),
