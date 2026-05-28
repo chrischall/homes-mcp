@@ -1,11 +1,12 @@
 // Adapter that lets @fetchproxy/server's FetchproxyServer satisfy
 // homes-mcp's HomesTransport interface.
 //
-// As of @fetchproxy/server 0.9.0, lazy-revive on Chrome MV3 service-
-// worker eviction (default 2000ms) and per-request timeouts (default
-// 30000ms) are server defaults — we get them with zero configuration,
-// so we only forward those options to the server when the caller
-// overrides them. The convenience `request()` method throws typed
+// As of @fetchproxy/server 0.10.0, lazy-revive on Chrome MV3 service-
+// worker eviction (default 2000ms), per-request timeouts (default
+// 30000ms), and the proactive keep-alive ping interval (default
+// 25000ms, fetchproxy#72) are all server defaults — we get them with
+// zero configuration, so we only forward those options to the server
+// when the caller overrides them. The convenience `request()` method throws typed
 // `FetchproxyBridgeDownError` / `FetchproxyTimeoutError` on failure
 // (both subclasses of `FetchproxyProtocolError`). Process-wide
 // freshness counters are exposed via `bridgeHealth()` — homes-mcp's
@@ -16,10 +17,12 @@ import {
   type FetchproxyServerOpts,
 } from '@fetchproxy/server';
 import type {
+  BridgeProbeResult,
   BridgeStatus,
   FetchInit,
   FetchResult,
   HomesTransport,
+  JsonRequestInit,
 } from './transport.js';
 
 // Re-export the typed errors so consumers (e.g. healthcheck) can keep
@@ -65,10 +68,12 @@ export class FetchproxyTransport implements HomesTransport {
       version: opts.version,
       // Subdomains of homes.com (www, photos, etc.) match automatically.
       domains: ['homes.com'],
-      // fetchproxy#71 — keep SW resident across human-paced session gaps
-      keepAliveIntervalMs: 25_000,
-      // 0.9.0 defaults fetchTimeoutMs=30_000 and bridgeReviveDelayMs=2_000,
-      // so only forward overrides when the caller actually supplies one.
+      // 0.10.0 promotes keepAliveIntervalMs to a 25_000 default (fetchproxy
+      // #72 — the round-3 #71 cohort showed every consumer was opting into
+      // exactly this value, so the explicit opt-in is gone here and we rely
+      // on the server default. Behavior-preserving.
+      // 0.10.0 also defaults fetchTimeoutMs=30_000 and bridgeReviveDelayMs=
+      // 2_000, so only forward overrides when the caller actually supplies one.
       ...(opts.fetchTimeoutMs !== undefined
         ? { fetchTimeoutMs: opts.fetchTimeoutMs }
         : {}),
@@ -125,5 +130,43 @@ export class FetchproxyTransport implements HomesTransport {
       body: init.body,
     });
     return { status: response.status, body: response.body, url: response.url };
+  }
+
+  async requestJson<T>(
+    init: JsonRequestInit
+  ): Promise<{ data: T | null; result: FetchResult }> {
+    // 0.10.0+: `requestJson` owns serialization + Accept/Content-Type
+    // header defaults + 204/empty-body → null + JSON.parse. It returns
+    // BOTH the parsed `data` and the raw success-arm FetchResult so the
+    // client can keep its homes.com-specific throwIfNotOk / sign-in
+    // guards over `result`. Bridge failures still throw the typed errors
+    // (FetchproxyBridgeDownError / FetchproxyTimeoutError) via request().
+    const { data, result } = await this.inner.requestJson<T>(
+      init.method,
+      init.path,
+      {
+        subdomain: 'www',
+        headers: init.headers,
+        body: init.body,
+      }
+    );
+    return {
+      data,
+      result: { status: result.status, body: result.body, url: result.url },
+    };
+  }
+
+  /**
+   * 0.10.0+: delegate the transport half of the healthcheck probe loop
+   * to the server's `runProbe` — it runs `fetchFn`, measures elapsed ms,
+   * classifies any thrown error, and projects post-probe `bridgeHealth()`
+   * into the snake-cased `bridge` block. The tool registration and the
+   * homes-specific hint text stay in src/tools/healthcheck.ts.
+   */
+  runProbe(
+    fetchFn: (path: string) => Promise<unknown>,
+    probePath: string
+  ): Promise<BridgeProbeResult> {
+    return this.inner.runProbe(fetchFn, probePath);
   }
 }

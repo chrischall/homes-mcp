@@ -6,8 +6,9 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Capture FetchproxyServer constructor args so we can assert that
-// FetchproxyTransport opts into proactive keepalive (fetchproxy#71 /
-// homes-mcp#51). The mock has to be declared before the SUT import.
+// FetchproxyTransport no longer opts into proactive keepalive explicitly
+// — 0.10.0 promotes it to a 25_000 default (fetchproxy#72). The mock has
+// to be declared before the SUT import.
 const fetchproxyCtorArgs: unknown[] = [];
 vi.mock('@fetchproxy/server', async () => {
   const actual =
@@ -282,17 +283,19 @@ describe('FetchproxyTransport', () => {
     expect(t.status().fetchTimeoutMs).toBe(12_345);
   });
 
-  // fetchproxy#71 / homes-mcp#51: opt into the server's proactive
-  // keepalive so the MV3 service worker stays resident across the
-  // human-paced gaps between MCP turns. The exact value matches our
-  // adapter's hard-coded choice (25s — below Chrome's 30s SW idle
-  // timeout, and ~5x below the 60s ping_interval cap).
-  it('opts into FetchproxyServer keepAliveIntervalMs=25_000 (fetchproxy#71 / homes-mcp#51)', () => {
+  // fetchproxy#72: 0.10.0 promotes keepAliveIntervalMs to a 25_000
+  // default (the round-3 #71 cohort showed every consumer was opting into
+  // exactly this value). The adapter no longer passes it explicitly and
+  // relies on the server default — so the constructor opts must NOT carry
+  // a keepAliveIntervalMs key. This is behavior-preserving: the resolved
+  // value is still 25s, just sourced from the server instead of the
+  // consumer.
+  it('does not pass keepAliveIntervalMs (relies on 0.10.0 default of 25_000, fetchproxy#72)', () => {
     fetchproxyCtorArgs.length = 0;
     new FetchproxyTransport({ version: '0.0.0' });
     expect(fetchproxyCtorArgs).toHaveLength(1);
     const opts = fetchproxyCtorArgs[0] as { keepAliveIntervalMs?: number };
-    expect(opts.keepAliveIntervalMs).toBe(25_000);
+    expect(opts.keepAliveIntervalMs).toBeUndefined();
   });
 
   it('status().role reflects whatever role bridgeHealth() reports (null pre-listen)', () => {

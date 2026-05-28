@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withDeadline } from '../../src/tools/deadline.js';
+import { withDeadline } from '@fetchproxy/server';
 
 /**
  * `withDeadline` is the building block for the per-request and overall
- * deadlines added in #54. It races a promise against a timer and
- * resolves to a discriminated `{ timedOut }` envelope instead of
+ * deadlines added in #54. As of @fetchproxy/server 0.10.0 it's imported
+ * from the dep (promoted from homes-mcp's local `src/tools/deadline.ts`
+ * in fetchproxy#86); this test keeps the original behavioral parity bar
+ * against the adopted implementation. It races a promise against a timer
+ * and resolves to a discriminated `{ timedOut }` envelope instead of
  * throwing — callers decide how to mark a timed-out row. Crucially it
  * must clear its timer on the happy path so it never keeps the event
  * loop alive, and must not reject when the inner promise rejects (the

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterAll } from 'vitest';
+import { classifyBridgeError } from '@fetchproxy/server';
 import type { HomesClient } from '../../src/client.js';
 import { registerHealthcheckTools } from '../../src/tools/healthcheck.js';
 import {
@@ -6,7 +7,10 @@ import {
   FetchproxyProtocolError,
   FetchproxyTimeoutError,
 } from '../../src/transport-fetchproxy.js';
-import type { BridgeStatus } from '../../src/transport.js';
+import type {
+  BridgeProbeResult,
+  BridgeStatus,
+} from '../../src/transport.js';
 import { createTestHarness, parseToolResult } from '../helpers.js';
 
 const DEFAULT_STATUS: BridgeStatus = {
@@ -25,11 +29,56 @@ function stubClient(args: {
   status?: Partial<BridgeStatus>;
   fetchHtml?: ReturnType<typeof vi.fn>;
 }): HomesClient {
+  const status: BridgeStatus = { ...DEFAULT_STATUS, ...(args.status ?? {}) };
+  const fetchHtml =
+    args.fetchHtml ?? vi.fn().mockResolvedValue('User-agent: *');
+  // Stand-in for the transport's runProbe (which delegates to
+  // @fetchproxy/server 0.10.0's probe loop): run the supplied probe
+  // closure, classify any thrown error, and project bridgeStatus() into
+  // the snake-cased `bridge` block — exactly the shape the real
+  // BridgeProbeResult carries. The healthcheck tool layers the
+  // homes-specific extras (rich typed-error block, body_length,
+  // last_extension_message_at, hint) on top of this.
+  const runProbe = vi
+    .fn()
+    .mockImplementation(
+      async (
+        fetchFn: (path: string) => Promise<unknown>,
+        probePath: string
+      ): Promise<BridgeProbeResult> => {
+        const start = Date.now();
+        let ok = false;
+        let error: BridgeProbeResult['error'];
+        try {
+          await fetchFn(probePath);
+          ok = true;
+        } catch (e) {
+          error = {
+            kind: classifyBridgeError(e),
+            message: e instanceof Error ? e.message : String(e),
+          };
+        }
+        return {
+          ok,
+          elapsed_ms: Date.now() - start,
+          bridge: {
+            role: status.role,
+            port: status.port,
+            server_version: status.serverVersion,
+            fetch_timeout_ms: status.fetchTimeoutMs,
+            last_success_at: status.lastSuccessAt,
+            last_failure_at: status.lastFailureAt,
+            last_failure_reason: status.lastFailureReason,
+            consecutive_failures: status.consecutiveFailures,
+          },
+          ...(error ? { error } : {}),
+        };
+      }
+    );
   return {
-    bridgeStatus: vi
-      .fn()
-      .mockReturnValue({ ...DEFAULT_STATUS, ...(args.status ?? {}) }),
-    fetchHtml: args.fetchHtml ?? vi.fn().mockResolvedValue('User-agent: *'),
+    bridgeStatus: vi.fn().mockReturnValue(status),
+    fetchHtml,
+    runProbe,
   } as unknown as HomesClient;
 }
 

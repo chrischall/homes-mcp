@@ -15,8 +15,8 @@
 // Error mapping (non-2xx, sign-in interstitial, empty 204 body) lives
 // here so tool authors never have to think about it.
 import type {
+  BridgeProbeResult,
   BridgeStatus,
-  FetchInit,
   FetchResult,
   HomesTransport,
 } from './transport.js';
@@ -57,6 +57,20 @@ export class HomesClient {
   }
 
   /**
+   * 0.10.0+: run a single healthcheck probe through the transport's
+   * `runProbe` (which delegates to `@fetchproxy/server`'s probe loop):
+   * run `fetchFn`, measure elapsed ms, classify any error, and project
+   * the post-probe bridge state. `homes_healthcheck` supplies its own
+   * probe call + path and keeps the homes-specific hint text.
+   */
+  runProbe(
+    fetchFn: (path: string) => Promise<unknown>,
+    probePath: string
+  ): Promise<BridgeProbeResult> {
+    return this.transport.runProbe(fetchFn, probePath);
+  }
+
+  /**
    * GET a homes.com path, return the HTML body. Throws on non-2xx or
    * sign-in interstitial. The primary primitive for homes-mcp tools —
    * every homes.com page server-renders its data into a JSON-LD block
@@ -71,8 +85,15 @@ export class HomesClient {
 
   /**
    * POST/PUT/DELETE a JSON body, return the parsed JSON. Throws on
-   * non-2xx, invalid JSON, or sign-in page. Currently unused — kept for
-   * forward compatibility if homes.com exposes a usable JSON API.
+   * non-2xx, invalid JSON, or sign-in page. Used by the smartsearch
+   * typeahead rung in by-address.ts.
+   *
+   * 0.10.0+: serialization + Accept/Content-Type defaults + 204/empty →
+   * null + JSON.parse are owned by `@fetchproxy/server`'s `requestJson`
+   * (surfaced through the transport). The dep deliberately does NOT run
+   * the HTTP-status assertion or the sign-in interstitial check — those
+   * are homes.com-specific — so we keep `throwIfNotOk` / `throwIfSignInPage`
+   * here, run over the raw `result` the transport returns alongside `data`.
    */
   async fetchJson<T>(
     path: string,
@@ -83,36 +104,15 @@ export class HomesClient {
     } = {}
   ): Promise<T> {
     const method = init.method ?? 'POST';
-    const serialised: FetchInit = {
+    const { data, result } = await this.transport.requestJson<T>({
       path,
       method,
-      headers: {
-        Accept: 'application/json',
-        ...(method !== 'GET' && init.body !== undefined
-          ? { 'Content-Type': 'application/json' }
-          : {}),
-        ...(init.headers ?? {}),
-      },
-      body:
-        method === 'GET' || init.body === undefined
-          ? undefined
-          : JSON.stringify(init.body),
-    };
-    const result = await this.transport.fetch(serialised);
+      headers: init.headers,
+      body: init.body,
+    });
     this.throwIfNotOk(result, method, path);
     this.throwIfSignInPage(result);
-    if (result.status === 204 || result.body === '') {
-      return null as T;
-    }
-    try {
-      return JSON.parse(result.body) as T;
-    } catch (e) {
-      throw new Error(
-        `Homes ${method} ${path} — response was not JSON: ${String(
-          (e as Error).message
-        )}`
-      );
-    }
+    return data as T;
   }
 
   private throwIfNotOk(result: FetchResult, method: string, path: string): void {
