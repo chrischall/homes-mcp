@@ -27,6 +27,13 @@ import {
  * (homes.com redirecting on sign-in, WAF challenge, etc.); if
  * `/robots.txt` fails, the bridge or extension is the issue.
  *
+ * 0.10.0 integration: the transport half of this probe loop — run the
+ * probe fetch, time it, classify any error, and project the post-probe
+ * bridge counters — lives in `@fetchproxy/server`'s `runProbe` (surfaced
+ * through the client). This tool keeps the registration, the rich
+ * homes-shaped error block, the probe `status` / `body_length`, the
+ * `last_extension_message_at` liveness field, and the plain-English hint.
+ *
  * 0.8.0 integration notes:
  *   - The `error_kind` field on the response uses the canonical
  *     `BridgeError` discriminator from `classifyBridgeError`
@@ -156,33 +163,53 @@ export function registerHealthcheckTools(
       inputSchema: {},
     },
     async () => {
-      // We read bridgeStatus() once at the bottom (after the probe) so
-      // the freshness counters in the response include this very call.
-      // Don't read it up front — that snapshot would be stale.
-      const start = Date.now();
-      let probe: HealthcheckResult['probe'] = {
+      // 0.10.0+: the transport half of this probe loop — run the probe
+      // fetch, measure elapsed ms, classify any thrown error, and project
+      // the post-probe bridgeHealth() into the snake-cased `bridge` block
+      // — lives in @fetchproxy/server's `runProbe` (surfaced through the
+      // client). We hand it a probe closure and the probe path, and keep
+      // the homes-specific extras (the rich typed-error block, the
+      // body_length / status on the probe, last_extension_message_at, the
+      // error_kind discriminator, and the plain-English hint) here.
+      //
+      // The closure does double duty: it captures the success body length
+      // and re-throws the original typed error so we keep the *instance*
+      // for the rich error block (runProbe only hands back {kind, message}).
+      let bodyLength: number | undefined;
+      let thrown: unknown;
+      const probeResult = await client.runProbe(async (path) => {
+        try {
+          const html = await client.fetchHtml(path);
+          bodyLength = html.length;
+          return html;
+        } catch (e) {
+          thrown = e;
+          throw e;
+        }
+      }, PROBE_PATH);
+
+      const ok = probeResult.ok;
+      const probe: HealthcheckResult['probe'] = {
         url: `https://www.homes.com${PROBE_PATH}`,
-        elapsed_ms: 0,
+        elapsed_ms: probeResult.elapsed_ms,
+        ...(ok
+          ? // fetchHtml throws on non-2xx; reaching success means 2xx.
+            { status: 200, body_length: bodyLength ?? 0 }
+          : {}),
       };
+
+      // Rich, homes-shaped error block built from the captured *instance*.
+      // 0.8.0+: classifyBridgeError is the canonical discriminator —
+      // enforces the parent-after-subclass ordering of the typed-error
+      // hierarchy once at the dep boundary so we don't re-hand-roll an
+      // `instanceof` ladder that's easy to get wrong (parent class before
+      // subclass collapses the subclass arms onto 'protocol'). runProbe
+      // already classified into probeResult.error.kind — we re-derive the
+      // canonical BridgeError discriminator for the error_kind field.
       let error: HealthcheckResult['error'];
       let errorKind: BridgeError | undefined;
-      let ok = false;
-      try {
-        const html = await client.fetchHtml(PROBE_PATH);
-        probe = {
-          url: `https://www.homes.com${PROBE_PATH}`,
-          elapsed_ms: Date.now() - start,
-          status: 200, // fetchHtml throws on non-2xx; reaching here means 2xx
-          body_length: html.length,
-        };
-        ok = true;
-      } catch (e) {
-        const elapsedMs = Date.now() - start;
-        // 0.8.0+: classifyBridgeError is the canonical discriminator —
-        // enforces the parent-after-subclass ordering of the typed-error
-        // hierarchy once at the dep boundary so we don't re-hand-roll an
-        // `instanceof` ladder that's easy to get wrong (parent class
-        // before subclass collapses the subclass arms onto 'protocol').
+      if (!ok) {
+        const e = thrown;
         errorKind = classifyBridgeError(e);
         if (e instanceof FetchproxyTimeoutError) {
           // 0.8.0+: read role/port/elapsedMs directly off the error
@@ -217,31 +244,33 @@ export function registerHealthcheckTools(
             message: e instanceof Error ? e.message : String(e),
           };
         }
-        probe = { ...probe, elapsed_ms: elapsedMs };
       }
-      // Re-read after the probe — recordSuccess/recordFailure on the
-      // transport just updated the counters, so this snapshot reflects
-      // the freshest state including this very call.
-      const postProbeBridge = client.bridgeStatus();
+
+      // runProbe's `bridge` projection covers the freshness counters but
+      // not the 0.8.0 extension-liveness signal, so read that one field
+      // from bridgeStatus() (post-probe, so it reflects this very call).
+      const lastExtensionMessageAt =
+        client.bridgeStatus().lastExtensionMessageAt;
+      const b = probeResult.bridge;
       const result: HealthcheckResult = {
         ok,
         bridge: {
-          role: postProbeBridge.role,
-          port: postProbeBridge.port,
-          server_version: postProbeBridge.serverVersion,
-          fetch_timeout_ms: postProbeBridge.fetchTimeoutMs,
-          last_success_at: postProbeBridge.lastSuccessAt,
-          last_failure_at: postProbeBridge.lastFailureAt,
-          last_failure_reason: postProbeBridge.lastFailureReason,
-          consecutive_failures: postProbeBridge.consecutiveFailures,
-          last_extension_message_at: postProbeBridge.lastExtensionMessageAt,
+          role: b.role,
+          port: b.port,
+          server_version: b.server_version,
+          fetch_timeout_ms: b.fetch_timeout_ms,
+          last_success_at: b.last_success_at,
+          last_failure_at: b.last_failure_at,
+          last_failure_reason: b.last_failure_reason,
+          consecutive_failures: b.consecutive_failures,
+          last_extension_message_at: lastExtensionMessageAt,
         },
         probe,
         ...(errorKind !== undefined ? { error_kind: errorKind } : {}),
         ...(error ? { error } : {}),
         hint: hintFor({
           ok,
-          role: postProbeBridge.role,
+          role: b.role,
           errorKind: error?.kind,
         }),
       };

@@ -3,12 +3,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
+  withDeadline,
 } from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
-import { SINGLE_RESOLVE_DEADLINE_MS, withDeadline } from './deadline.js';
 import {
   buildSearchPath,
   findListings,
@@ -253,6 +253,20 @@ export async function resolveOneAddress(
     return UNRESOLVED;
   }
 }
+
+/**
+ * Hard overall deadline for a single `homes_get_by_address` call (#54).
+ * A single address runs at most two fetch rungs, each bounded by the
+ * transport's ~30s `fetchTimeoutMs`; without a wrapper that's up to ~60s,
+ * which races the MCP client's own deadline. Cap it below that so a hung
+ * fetch returns a clean `{ resolved: false, error: 'timeout' }` instead
+ * of an infinite hang.
+ *
+ * `withDeadline` itself now lives in `@fetchproxy/server` (promoted from
+ * homes-mcp's local `src/tools/deadline.ts` in fetchproxy#86); only this
+ * homes-specific deadline value stays here.
+ */
+const SINGLE_RESOLVE_DEADLINE_MS = 45_000;
 
 /** Canonical sentinel for a single-call that blew the overall deadline. */
 const TIMED_OUT: ByAddressUnresolved = { resolved: false, error: 'timeout' };

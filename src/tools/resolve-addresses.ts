@@ -4,6 +4,7 @@ import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
   retryOnceOnTimeout,
+  withDeadline,
 } from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
@@ -11,7 +12,18 @@ import {
   resolveOneAddress,
   type ByAddressInput,
 } from './by-address.js';
-import { RESOLVE_DEADLINE_MS, withDeadline } from './deadline.js';
+
+/**
+ * Overall deadline for a whole `homes_resolve_addresses` fan-out (#54).
+ * Below the MCP SDK's default 60s request timeout so the handler always
+ * wins the race and can return partial rows, rather than the client
+ * tearing the connection down first with a `-32001`.
+ *
+ * `withDeadline` itself now lives in `@fetchproxy/server` (promoted from
+ * homes-mcp's local `src/tools/deadline.ts` in fetchproxy#86); only this
+ * homes-specific deadline value stays here.
+ */
+export const RESOLVE_DEADLINE_MS = 50_000;
 
 /**
  * `homes_resolve_addresses` — batch sibling of `homes_get_by_address`
@@ -24,8 +36,6 @@ import { RESOLVE_DEADLINE_MS, withDeadline } from './deadline.js';
  * order so the caller can map a parallel `addresses[]` array onto
  * results without re-keying.
  */
-
-export { RESOLVE_DEADLINE_MS } from './deadline.js';
 
 const MAX_ADDRESSES = 100;
 

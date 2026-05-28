@@ -19,12 +19,47 @@ function stubTransport(
     start: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     fetch: vi.fn().mockImplementation(handler),
+    // Stand-in for the real transport's requestJson (which delegates to
+    // @fetchproxy/server 0.10.0's requestJson): serialize the body, add
+    // the Accept/Content-Type defaults, round-trip via the same handler,
+    // and split the reply into { data, result } with 204/empty → null.
+    // The client keeps its homes.com throwIfNotOk / sign-in guards over
+    // `result`.
+    requestJson: vi
+      .fn()
+      .mockImplementation(
+        async (init: {
+          path: string;
+          method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+          headers?: Record<string, string>;
+          body?: unknown;
+        }) => {
+          const isGet = init.method === 'GET';
+          const sendBody = !isGet && init.body !== undefined;
+          const result = await handler({
+            path: init.path,
+            method: init.method,
+            headers: {
+              Accept: 'application/json',
+              ...(sendBody ? { 'Content-Type': 'application/json' } : {}),
+              ...(init.headers ?? {}),
+            },
+            body: sendBody ? JSON.stringify(init.body) : undefined,
+          });
+          const data =
+            result.status === 204 || result.body === ''
+              ? null
+              : JSON.parse(result.body);
+          return { data, result };
+        }
+      ),
     status: vi.fn().mockReturnValue({
       role: 'host',
       port: 37149,
       serverVersion: '0.0.0',
       fetchTimeoutMs: 30_000,
     }),
+    runProbe: vi.fn(),
   };
 }
 
