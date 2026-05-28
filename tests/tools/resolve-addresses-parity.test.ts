@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import {
+  FetchproxyBridgeDownError,
+  FetchproxyTimeoutError,
+} from '@fetchproxy/server';
 import type { HomesClient } from '../../src/client.js';
 import { registerByAddressTools } from '../../src/tools/by-address.js';
 import { registerResolveAddressesTools } from '../../src/tools/resolve-addresses.js';
@@ -234,5 +238,122 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
     expect(br.results[1].resolved).toBe(false);
     expect(br.results[1].error).toBe('no listing found');
     expect(br.results[2].resolved).toBe(true);
+  });
+
+  it('bulk DIVERGES from single on fetchproxy bridge timeouts — surfaces them distinctly (round-3 #78)', async () => {
+    // Round-3 #78 carve-out from the broader parity contract above:
+    // the generic-error parity ("network down" → "no listing found")
+    // still holds, but `FetchproxyTimeoutError` and
+    // `FetchproxyBridgeDownError` are system-level outcomes that
+    // would silently inflate the "not found" count in a 60-row
+    // batch. Surface them via classifyRowError so a summary like
+    // "60/60 with 3 timeouts" stays distinguishable from
+    // "60/60 with 3 missing listings".
+
+    // Single-call behaviour: bridge timeout still degrades to
+    // "no listing found" — the unified canonical-URL caller
+    // expects a single error sentinel.
+    mockFetchHtml.mockRejectedValueOnce(
+      new FetchproxyTimeoutError({
+        url: 'https://homes.com/',
+        timeoutMs: 12000,
+      })
+    );
+    const sr = parseToolResult<SingleResult>(
+      await single.callTool('homes_get_by_address', ADDRS[0])
+    );
+    expect(sr.resolved).toBe(false);
+    if (!sr.resolved) expect(sr.error).toBe('no listing found');
+
+    // Bulk path: row 1's address ("2 Oak Ave") slugs into a path
+    // starting `/2-oak-ave-…/`; first attempt + retry both time out
+    // → row 1 surfaces 'bridge timeout after retry: …'. Path-keyed
+    // so concurrent fan-out order doesn't affect which row gets it.
+    mockFetchHtml.mockReset();
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      if (path.startsWith('/2-oak-ave-')) {
+        throw new FetchproxyTimeoutError({
+          url: 'https://homes.com/',
+          timeoutMs: 12000,
+        });
+      }
+      if (path.startsWith('/1-main-st-'))
+        return detailHtml('hash-1-main', '1 Main St');
+      if (path.startsWith('/3-pine-dr-'))
+        return detailHtml('hash-3-pine', '3 Pine Dr');
+      return '<html></html>';
+    });
+
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', { addresses: ADDRS })
+    );
+
+    expect(br.results[0].resolved).toBe(true);
+    expect(br.results[1].resolved).toBe(false);
+    expect(br.results[1].error).toMatch(/^bridge timeout after retry:/);
+    expect(br.results[2].resolved).toBe(true);
+  });
+
+  it('bulk retries once on bridge timeout — second attempt success makes the row resolve', async () => {
+    // The rotating-tab tax: the first request to a stale tab times
+    // out, but the second attempt almost always succeeds. We
+    // shouldn't burn a row over a transient first-attempt timeout.
+    // Path-keyed: first attempt for the row's slug times out;
+    // subsequent attempts succeed.
+    const attempts = new Map<string, number>();
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      const n = (attempts.get(path) ?? 0) + 1;
+      attempts.set(path, n);
+      if (n === 1) {
+        throw new FetchproxyTimeoutError({
+          url: 'https://homes.com/',
+          timeoutMs: 12000,
+        });
+      }
+      return detailHtml('hash-1-main', '1 Main St');
+    });
+
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', { addresses: [ADDRS[0]] })
+    );
+    expect(br.results[0].resolved).toBe(true);
+    expect(br.results[0].property_id).toBe('hash-1-main');
+  });
+
+  it('bulk surfaces bridge-down distinctly from "no listing found"', async () => {
+    mockFetchHtml.mockRejectedValue(
+      new FetchproxyBridgeDownError({
+        originalError: 'WebSocket connection refused',
+      })
+    );
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', { addresses: [ADDRS[0]] })
+    );
+    expect(br.results[0].resolved).toBe(false);
+    expect(br.results[0].error).toMatch(/^bridge unreachable:/);
+  });
+
+  it('bulk caps in-flight fetches at BRIDGE_CONCURRENCY (=6)', async () => {
+    let inFlight = 0;
+    let peakInFlight = 0;
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      inFlight++;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight--;
+      const id = path.match(/(\d+)/)?.[1] ?? '0';
+      return detailHtml(`hash-${id}`, `${id} Main`);
+    });
+    const addresses = Array.from({ length: 18 }, (_, i) => ({
+      address: `${i} Main St`,
+      city: 'Atlanta',
+      state: 'GA',
+    }));
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', { addresses })
+    );
+    expect(br.count).toBe(18);
+    expect(peakInFlight).toBeLessThanOrEqual(6);
+    expect(peakInFlight).toBeGreaterThan(1);
   });
 });

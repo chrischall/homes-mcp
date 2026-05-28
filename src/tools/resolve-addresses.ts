@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  BRIDGE_CONCURRENCY,
+  classifyRowError,
+  mapWithConcurrency,
+  retryOnceOnTimeout,
+} from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import {
@@ -68,29 +74,59 @@ export function registerResolveAddressesTools(
     async ({ addresses }) => {
       const ts = addresses as ByAddressInput[];
       // Fan out via the same rung `homes_get_by_address` runs.
-      // `resolveOneAddress` owns the slug → fetch → parse →
-      // transport-error-degrades-to-"no listing found" contract; we
-      // only reshape the success row (renaming `property_hash` to
+      // `resolveOneAddress` owns the slug → fetch → parse → graceful
+      // "no listing found" degradation for generic transport errors;
+      // we only reshape the success row (renaming `property_hash` to
       // `property_id` to line up with `homes_bulk_get`).
-      const rows: ResolveRow[] = await Promise.all(
-        ts.map(async (input): Promise<ResolveRow> => {
-          const result = await resolveOneAddress(client, input);
-          if (result.resolved) {
+      //
+      // Bulk-specific behaviour vs the single-call tool:
+      //
+      //   1. Bounded concurrency via `mapWithConcurrency` +
+      //      BRIDGE_CONCURRENCY (=6). A 60-address batch fanning out
+      //      unbounded tips the bridge into timeouts (round-3 #78).
+      //   2. `retryOnceOnTimeout` absorbs the rotating-tab tax.
+      //   3. `rethrowBridgeErrors: true` lets fetchproxy timeouts /
+      //      bridge-down errors surface distinctly via
+      //      `classifyRowError`, so a summary like "60/60 with 3
+      //      timeouts" doesn't masquerade as "60/60 with 3 missing
+      //      listings". Non-fetchproxy transport errors still
+      //      degrade to the canonical `'no listing found'` sentinel
+      //      — the parity contract with the single tool is preserved
+      //      for everything except fetchproxy bridge failures, which
+      //      are a system-level outcome the caller deserves to see.
+      const rows: ResolveRow[] = await mapWithConcurrency(
+        ts,
+        BRIDGE_CONCURRENCY,
+        async (input): Promise<ResolveRow> => {
+          try {
+            const result = await retryOnceOnTimeout(() =>
+              resolveOneAddress(client, input, {
+                rethrowBridgeErrors: true,
+              })
+            );
+            if (result.resolved) {
+              return {
+                ...input,
+                resolved: true,
+                url: result.url,
+                property_id: result.property_hash,
+                street_address: result.street_address,
+                matched_via: result.matched_via,
+              };
+            }
             return {
               ...input,
-              resolved: true,
-              url: result.url,
-              property_id: result.property_hash,
-              street_address: result.street_address,
-              matched_via: result.matched_via,
+              resolved: false,
+              error: result.error,
+            };
+          } catch (e) {
+            return {
+              ...input,
+              resolved: false,
+              error: classifyRowError(e).message,
             };
           }
-          return {
-            ...input,
-            resolved: false,
-            error: result.error,
-          };
-        })
+        }
       );
       return textResult({
         count: rows.length,

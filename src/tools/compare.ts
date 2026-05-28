@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  BRIDGE_CONCURRENCY,
+  classifyRowError,
+  mapWithConcurrency,
+  retryOnceOnTimeout,
+} from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import {
@@ -113,10 +119,19 @@ export function registerCompareTools(
     },
     async ({ targets, include_description, include_summary }) => {
       const ts = targets as CompareTarget[];
-      const rows: CompareRow[] = await Promise.all(
-        ts.map(async (t) => {
+      // See bulk-get.ts header for the round-3 #78 rationale on
+      // BRIDGE_CONCURRENCY + retryOnceOnTimeout + classifyRowError.
+      // Compare caps at 8 targets so the cap rarely binds, but the
+      // distinct-timeout wrapper still matters: a bridge timeout in
+      // row 3 of an 8-row compare must not look like a parse error.
+      const rows: CompareRow[] = await mapWithConcurrency(
+        ts,
+        BRIDGE_CONCURRENCY,
+        async (t) => {
           try {
-            const { listing, html } = await fetchListingRecord(client, t);
+            const { listing, html } = await retryOnceOnTimeout(() =>
+              fetchListingRecord(client, t)
+            );
             const formatted = format(listing, html, {
               includeDescription: include_description,
             });
@@ -128,10 +143,10 @@ export function registerCompareTools(
           } catch (e) {
             return {
               url: t.url,
-              error: (e as Error).message,
+              error: classifyRowError(e).message,
             };
           }
-        })
+        }
       );
       const payload: {
         count: number;

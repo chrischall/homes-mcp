@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  BRIDGE_CONCURRENCY,
+  classifyRowError,
+  mapWithConcurrency,
+  retryOnceOnTimeout,
+} from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import {
@@ -62,10 +68,22 @@ export function registerBulkGetTools(
       },
     },
     async ({ urls, include_description }) => {
-      const rows: BulkRow[] = await Promise.all(
-        urls.map(async (url): Promise<BulkRow> => {
+      // Bounded fan-out via @fetchproxy/server 0.9.x bulk helpers:
+      // BRIDGE_CONCURRENCY (=6) caps in-flight requests so a wide
+      // batch doesn't tip the bridge into timeouts (round-3 #78);
+      // retryOnceOnTimeout absorbs the rotating-tab tax that hits
+      // the first request to a stale tab; classifyRowError keeps
+      // bridge timeouts / bridge-down distinct from real per-row
+      // parse errors so a summary like "20/20 with 2 timeouts"
+      // can't be confused with "20/20 with 2 missing listings".
+      const rows: BulkRow[] = await mapWithConcurrency(
+        urls,
+        BRIDGE_CONCURRENCY,
+        async (url): Promise<BulkRow> => {
           try {
-            const { listing, html } = await fetchListingRecord(client, { url });
+            const { listing, html } = await retryOnceOnTimeout(() =>
+              fetchListingRecord(client, { url })
+            );
             const formatted = format(listing, html, {
               includeDescription: include_description,
             });
@@ -77,10 +95,10 @@ export function registerBulkGetTools(
           } catch (e) {
             return {
               url,
-              error: (e as Error).message,
+              error: classifyRowError(e).message,
             };
           }
-        })
+        }
       );
       return textResult({
         count: rows.length,
