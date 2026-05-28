@@ -26,7 +26,7 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_get_saved_homes` | `tools/saved.ts` | `GET /customer/dashboard/favorites/` — auth-gated DOM scrape | read (auth) |
 | `homes_get_saved_searches` | `tools/saved.ts` | `GET /customer/dashboard/saved-searches/` — auth-gated DOM scrape | read (auth) |
 | `homes_estimate_rent_vs_buy` | `tools/rent-vs-buy.ts` | (local; no network — caller supplies `monthly_rent`; homes.com has no rental signal — see "Rental data gap" below) | read |
-| `homes_get_by_address` | `tools/by-address.ts` | `GET /<address-slug>/` SSR — pick first `CollectionPage.mainEntity.itemListElement[0]` (or single `RealEstateListing` if homes.com redirects to detail). Returns `{ resolved: false, error }` on miss. | read |
+| `homes_get_by_address` | `tools/by-address.ts` | `GET /<address-slug>/` SSR — pick first `CollectionPage.mainEntity.itemListElement[0]` (or single `RealEstateListing` if homes.com redirects to detail). On a slug miss, falls back to `/<city-slug>-<state>/` (or `/<zip>/`) and fuzzy-matches the street. Surfaces `matched_via: "slug" \| "search_fallback"` on hits. Returns `{ resolved: false, error }` on miss. | read |
 
 ## Architecture
 
@@ -66,8 +66,11 @@ src/
     rent-vs-buy.ts      # homes_estimate_rent_vs_buy (local; no network)
     by-address.ts       # homes_get_by_address (slugify address parts,
                         #   fetch /<slug>/, take first listing or single
-                        #   RealEstateListing; graceful { resolved: false }
-                        #   on miss/error for unified canonical-URL caller)
+                        #   RealEstateListing; on a miss falls back to the
+                        #   city/zip search page + street-token fuzzy
+                        #   match — surfaces matched_via to the caller.
+                        #   Graceful { resolved: false } on miss/error
+                        #   for unified canonical-URL caller)
 
 tests/                  # 1:1 mirror of src/, plus tests/helpers.ts harness.
                         #   All tests mock HomesClient.fetchHtml.

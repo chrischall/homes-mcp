@@ -74,6 +74,7 @@ interface SingleOk {
   url: string;
   property_hash: string;
   street_address: string;
+  matched_via: 'slug' | 'search_fallback';
 }
 interface SingleFail {
   resolved: false;
@@ -90,6 +91,7 @@ interface BulkRow {
   url?: string;
   property_id?: string;
   street_address?: string;
+  matched_via?: 'slug' | 'search_fallback';
   error?: string;
 }
 interface BulkResult {
@@ -136,21 +138,74 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
       expect(b.resolved).toBe(s.resolved);
       if (s.resolved && b.resolved) {
         // Same upstream rung → same hash, same canonical URL,
-        // same street_address — modulo the documented `property_hash`
-        // → `property_id` field rename in the bulk shape.
+        // same street_address, same matched_via — modulo the documented
+        // `property_hash` → `property_id` field rename in the bulk shape.
         expect(b.url).toBe(s.url);
         expect(b.property_id).toBe(s.property_hash);
         expect(b.street_address).toBe(s.street_address);
+        expect(b.matched_via).toBe(s.matched_via);
       } else if (!s.resolved && !b.resolved) {
         expect(b.error).toBe(s.error);
       }
     }
   });
 
+  it('bulk surfaces matched_via:"search_fallback" identically to a single call when slug rung misses', async () => {
+    // Slug-rung miss on every address, fallback hits city search.
+    function fallbackHtml(path: string): string {
+      if (path.startsWith('/atlanta-ga/')) {
+        // Search-fallback collection: one matching row per address.
+        const items = [
+          { id: 'hash-1-main', street: '1 Main St' },
+          { id: 'hash-2-oak', street: '2 Oak Ave' },
+          { id: 'hash-3-pine', street: '3 Pine Dr' },
+        ].map((row) => ({
+          '@type': ['RealEstateListing', 'Product'],
+          '@id': `https://www.homes.com/property/x/${row.id}/#realestatelisting`,
+          url: `https://www.homes.com/property/x/${row.id}/`,
+          mainEntity: { address: { streetAddress: row.street } },
+        }));
+        return `<html><script type="application/ld+json">${JSON.stringify({
+          '@graph': [
+            { '@type': 'CollectionPage', mainEntity: { itemListElement: items } },
+          ],
+        })}</script></html>`;
+      }
+      // Slug paths — empty / no JSON-LD → slug rung misses.
+      return '<html>nothing here</html>';
+    }
+    mockFetchHtml.mockImplementation(async (path: string) => fallbackHtml(path));
+
+    const singles: SingleResult[] = [];
+    for (const a of ADDRS) {
+      const r = await single.callTool('homes_get_by_address', a);
+      singles.push(parseToolResult<SingleResult>(r));
+    }
+
+    mockFetchHtml.mockClear();
+    mockFetchHtml.mockImplementation(async (path: string) => fallbackHtml(path));
+
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', { addresses: ADDRS })
+    );
+
+    for (let i = 0; i < ADDRS.length; i++) {
+      const s = singles[i];
+      const b = br.results[i];
+      expect(s.resolved).toBe(true);
+      expect(b.resolved).toBe(true);
+      if (s.resolved && b.resolved) {
+        expect(s.matched_via).toBe('search_fallback');
+        expect(b.matched_via).toBe('search_fallback');
+        expect(b.property_id).toBe(s.property_hash);
+      }
+    }
+  });
+
   it('bulk degrades transport errors to "no listing found" — same canonical string as single', async () => {
-    // Single-call behaviour: fetch throws → returns the canonical
-    // "no listing found" sentinel (see by-address.test.ts).
-    mockFetchHtml.mockRejectedValueOnce(new Error('network down'));
+    // Single-call behaviour: every fetch throws (slug AND fallback) →
+    // returns the canonical "no listing found" sentinel.
+    mockFetchHtml.mockRejectedValue(new Error('network down'));
     const sr = parseToolResult<SingleResult>(
       await single.callTool('homes_get_by_address', ADDRS[0])
     );
@@ -160,10 +215,16 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
     // Bulk must match — otherwise the bulk path leaks transport
     // noise that a per-row retry through `homes_get_by_address`
     // would have hidden, breaking the "use bulk for ≥ 3" guidance.
-    mockFetchHtml
-      .mockResolvedValueOnce(detailHtml('hash-1-main', '1 Main St'))
-      .mockRejectedValueOnce(new Error('network down'))
-      .mockResolvedValueOnce(detailHtml('hash-3-pine', '3 Pine Dr'));
+    // Per-row routing: slug paths resolve, only address #2 (every fetch
+    // including its fallback) throws.
+    mockFetchHtml.mockReset();
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      if (path.startsWith('/1-main-st-'))
+        return detailHtml('hash-1-main', '1 Main St');
+      if (path.startsWith('/3-pine-dr-'))
+        return detailHtml('hash-3-pine', '3 Pine Dr');
+      throw new Error('network down');
+    });
 
     const br = parseToolResult<BulkResult>(
       await bulk.callTool('homes_resolve_addresses', { addresses: ADDRS })

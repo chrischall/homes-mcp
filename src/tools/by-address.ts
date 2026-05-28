@@ -5,6 +5,7 @@ import { textResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
 import {
+  buildSearchPath,
   findListings,
   extractPropertyId,
   type JsonLdListingItem,
@@ -54,6 +55,13 @@ export interface ByAddressResolved {
   property_hash: string;
   street_address: string;
   resolved: true;
+  /**
+   * Which rung resolved the address. `'slug'` — direct
+   * `/<address-slug>/` hit. `'search_fallback'` — city/zip search-page
+   * fuzzy match (#47). Lets callers see whether they got a precise
+   * routing hit or a corpus-search guess.
+   */
+  matched_via: 'slug' | 'search_fallback';
 }
 
 export interface ByAddressUnresolved {
@@ -108,28 +116,72 @@ function asListingItem(listing: DirectListing): JsonLdListingItem {
 }
 
 /**
- * Run the single-address resolution rung end-to-end: build the
- * homes.com slug, fetch the page, and parse it. Single- and bulk-
- * address tools MUST go through this helper so a future change to
- * the resolution strategy (retry, alternate slug, etc.) lands in
- * both at once. Transport / non-2xx / sign-in interstitials are
- * caught and surfaced as the graceful `'no listing found'` outcome.
+ * Run the single-address resolution rungs end-to-end. Two rungs in
+ * sequence:
+ *
+ *   1. **Slug rung.** Slugify `{address, city, state, zip}` →
+ *      `GET /<slug>/`. The common hit; routes to a collection or
+ *      detail page on success.
+ *   2. **Search-fallback rung (#47).** When the slug rung returns no
+ *      listing (404, empty collection, no JSON-LD), fall through to
+ *      the city/zip search page (the same path shape `search.ts`
+ *      builds via `buildSearchPath`), then address-fuzzy-match the
+ *      results. Load-bearing for rural / locality-mismatched
+ *      addresses that the slug routing misses.
+ *
+ * Single- and bulk-address tools MUST go through this helper so a
+ * future change to the resolution strategy lands in both at once.
+ * Transport / non-2xx / sign-in interstitials at any rung are caught
+ * and surfaced as the graceful `'no listing found'` outcome (#45).
  */
 export async function resolveOneAddress(
   client: { fetchHtml: (path: string) => Promise<string> },
   input: ByAddressInput
 ): Promise<ByAddressResult> {
-  const path = buildAddressSearchPath(input);
-  let html: string;
+  // Rung 1: slug.
+  const slugPath = buildAddressSearchPath(input);
   try {
-    html = await client.fetchHtml(path);
+    const html = await client.fetchHtml(slugPath);
+    const slug = resolveListing(html, 'slug');
+    if (slug.resolved) return slug;
+  } catch {
+    // Fall through to the search rung.
+  }
+
+  // Rung 2: city / zip search fallback.
+  const fallbackLocation = buildFallbackLocation(input);
+  if (!fallbackLocation) return UNRESOLVED;
+  const searchPath = buildSearchPath({ location: fallbackLocation });
+  try {
+    const html = await client.fetchHtml(searchPath);
+    return resolveBySearchFallback(html, input);
   } catch {
     return UNRESOLVED;
   }
-  return resolveListing(html);
 }
 
-export function resolveListing(html: string): ByAddressResult {
+/**
+ * Pick the location string handed to `buildSearchPath` for the fallback
+ * rung. Prefer `"city, state"` (matches every other location-based
+ * tool); fall back to `zip` if `city + state` are absent.
+ *
+ * City-only or state-only locality shapes are intentionally rejected —
+ * a bare `"NC"` or `"Springfield"` produces a state-wide / ambiguous
+ * search whose results are too broad for the fuzzy matcher to safely
+ * pick from. ZIP-only stays (narrow enough to be useful).
+ */
+function buildFallbackLocation(input: ByAddressInput): string | null {
+  const city = input.city?.trim();
+  const state = input.state?.trim();
+  if (city && state) return `${city}, ${state}`;
+  if (input.zip?.trim()) return input.zip.trim();
+  return null;
+}
+
+export function resolveListing(
+  html: string,
+  matchedVia: 'slug' | 'search_fallback' = 'slug'
+): ByAddressResult {
   const doc = extractJsonLd(html);
   if (!doc) return UNRESOLVED;
 
@@ -144,6 +196,7 @@ export function resolveListing(html: string): ByAddressResult {
         property_hash: hash,
         street_address: item.mainEntity?.address?.streetAddress ?? '',
         resolved: true,
+        matched_via: matchedVia,
       };
     }
   }
@@ -158,10 +211,78 @@ export function resolveListing(html: string): ByAddressResult {
       property_hash: hash,
       street_address: item.mainEntity?.address?.streetAddress ?? '',
       resolved: true,
+      matched_via: matchedVia,
     };
   }
 
   return UNRESOLVED;
+}
+
+/**
+ * Parse a city/zip search-fallback page and pick the listing whose
+ * street address fuzzy-matches `input.address`. Token-set comparison
+ * keyed on normalized alphanumeric segments (street number + name).
+ */
+function resolveBySearchFallback(
+  html: string,
+  input: ByAddressInput
+): ByAddressResult {
+  const doc = extractJsonLd(html);
+  if (!doc) return UNRESOLVED;
+  const { items } = findListings(doc);
+  if (items.length === 0) return UNRESOLVED;
+
+  const wanted = streetTokens(input.address);
+  if (wanted.size === 0) return UNRESOLVED;
+
+  let best: { item: JsonLdListingItem; score: number } | null = null;
+  for (const item of items) {
+    const street = item.mainEntity?.address?.streetAddress;
+    if (!street) continue;
+    const got = streetTokens(street);
+    if (got.size === 0) continue;
+    // Require the street number (first numeric token, if present)
+    // to match — guards against same-name streets at different
+    // numbers in the same city.
+    const wantNum = firstNumericToken(input.address);
+    const gotNum = firstNumericToken(street);
+    if (wantNum && gotNum && wantNum !== gotNum) continue;
+    let overlap = 0;
+    for (const t of wanted) if (got.has(t)) overlap += 1;
+    const score = overlap / wanted.size;
+    if (!best || score > best.score) best = { item, score };
+  }
+
+  // Require a strict majority of the input's street tokens to match.
+  // `<= 0.5` rejects exact-half overlap — for 2-token input like
+  // "Main St", a single common token (e.g. "st") would clear a `< 0.5`
+  // bar and pick an unrelated listing.
+  if (!best || best.score <= 0.5) return UNRESOLVED;
+  const hash = extractPropertyId(best.item);
+  if (!hash) return UNRESOLVED;
+  return {
+    url: best.item.url ?? best.item['@id']?.replace(/[?#].*$/, '') ?? '',
+    property_hash: hash,
+    street_address: best.item.mainEntity?.address?.streetAddress ?? '',
+    resolved: true,
+    matched_via: 'search_fallback',
+  };
+}
+
+function streetTokens(street: string): Set<string> {
+  return new Set(
+    street
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 0)
+  );
+}
+
+function firstNumericToken(street: string): string | null {
+  const m = street.match(/\d+/);
+  return m ? m[0] : null;
 }
 
 export function registerByAddressTools(
@@ -173,7 +294,7 @@ export function registerByAddressTools(
     {
       title: 'Resolve a street address to a homes.com property URL',
       description:
-        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Slugifies the parts into homes.com's location-routing format and parses the embedded Schema.org JSON-LD — handles both the search-results shape (CollectionPage with matching listings) and the detail-page redirect (single RealEstateListing). Returns `{ url, property_hash, street_address, resolved: true }` on success, or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODES: (a) rural addresses and very-new construction often miss because homes.com hasn't indexed them yet, (b) the resolver picks the FIRST listing on a collection redirect — if homes.com returns multiple loose matches, you may get a wrong-but-plausible neighbour. Compare the returned `street_address` against your input to catch this. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
+        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Slugifies the parts into homes.com's location-routing format and parses the embedded Schema.org JSON-LD — handles both the search-results shape (CollectionPage with matching listings) and the detail-page redirect (single RealEstateListing). On a slug miss, falls back to a city/zip search page and fuzzy-matches street tokens (rural/locality-mismatched addresses). Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODES: (a) rural addresses and very-new construction often miss because homes.com hasn't indexed them yet, (b) the resolver picks the FIRST listing on a collection redirect — if homes.com returns multiple loose matches, you may get a wrong-but-plausible neighbour. Compare the returned `street_address` against your input to catch this. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Resolve a street address to a homes.com property URL',
         readOnlyHint: true,
