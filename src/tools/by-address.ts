@@ -109,13 +109,11 @@ function asListingItem(listing: DirectListing): JsonLdListingItem {
 
 /**
  * Run the single-address resolution rung end-to-end: build the
- * homes.com slug, fetch the page, and parse it. Shared between
- * `homes_get_by_address` (one call) and `homes_resolve_addresses`
- * (bulk). Both tools MUST go through this helper so a future change
- * to the resolution strategy (retry, alternate slug, etc.) lands in
+ * homes.com slug, fetch the page, and parse it. Single- and bulk-
+ * address tools MUST go through this helper so a future change to
+ * the resolution strategy (retry, alternate slug, etc.) lands in
  * both at once. Transport / non-2xx / sign-in interstitials are
- * caught and surfaced as the graceful `'no listing found'` outcome
- * — see #44 for the parity contract.
+ * caught and surfaced as the graceful `'no listing found'` outcome.
  */
 export async function resolveOneAddress(
   client: { fetchHtml: (path: string) => Promise<string> },

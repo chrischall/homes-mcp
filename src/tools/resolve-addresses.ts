@@ -66,8 +66,8 @@ export function registerResolveAddressesTools(
     },
     async ({ addresses }) => {
       const ts = addresses as ByAddressInput[];
-      // Fan out via the same rung `homes_get_by_address` runs — see
-      // #44. `resolveOneAddress` owns the slug → fetch → parse →
+      // Fan out via the same rung `homes_get_by_address` runs.
+      // `resolveOneAddress` owns the slug → fetch → parse →
       // transport-error-degrades-to-"no listing found" contract; we
       // only reshape the success row (renaming `property_hash` to
       // `property_id` to line up with `homes_bulk_get`).
