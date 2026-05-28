@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  FetchproxyBridgeDownError,
+  FetchproxyTimeoutError,
+} from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
@@ -133,10 +137,27 @@ function asListingItem(listing: DirectListing): JsonLdListingItem {
  * future change to the resolution strategy lands in both at once.
  * Transport / non-2xx / sign-in interstitials at any rung are caught
  * and surfaced as the graceful `'no listing found'` outcome (#45).
+ *
+ * Bulk callers can opt into `rethrowBridgeErrors: true` to surface
+ * `FetchproxyTimeoutError` / `FetchproxyBridgeDownError` distinctly
+ * (round-3 zillow #78: bridge timeouts must NEVER be reported as
+ * "no listing found" in a 60-row batch summary). The single-call
+ * default keeps swallowing every transport error so the unified
+ * canonical-URL caller can treat the row as "not on this site"
+ * rather than a system failure — the existing parity contract for
+ * generic `Error('network down')`-style failures is preserved. The
+ * opt-in applies to both rungs — a bridge timeout in the slug rung
+ * rethrows before the fallback rung fires, and a bridge timeout in
+ * the fallback rung rethrows too.
  */
+export interface ResolveOneAddressOpts {
+  rethrowBridgeErrors?: boolean;
+}
+
 export async function resolveOneAddress(
   client: { fetchHtml: (path: string) => Promise<string> },
-  input: ByAddressInput
+  input: ByAddressInput,
+  opts: ResolveOneAddressOpts = {}
 ): Promise<ByAddressResult> {
   // Rung 1: slug.
   const slugPath = buildAddressSearchPath(input);
@@ -144,7 +165,14 @@ export async function resolveOneAddress(
     const html = await client.fetchHtml(slugPath);
     const slug = resolveListing(html, 'slug');
     if (slug.resolved) return slug;
-  } catch {
+  } catch (err) {
+    if (
+      opts.rethrowBridgeErrors &&
+      (err instanceof FetchproxyTimeoutError ||
+        err instanceof FetchproxyBridgeDownError)
+    ) {
+      throw err;
+    }
     // Fall through to the search rung.
   }
 
@@ -155,7 +183,14 @@ export async function resolveOneAddress(
   try {
     const html = await client.fetchHtml(searchPath);
     return resolveBySearchFallback(html, input);
-  } catch {
+  } catch (err) {
+    if (
+      opts.rethrowBridgeErrors &&
+      (err instanceof FetchproxyTimeoutError ||
+        err instanceof FetchproxyBridgeDownError)
+    ) {
+      throw err;
+    }
     return UNRESOLVED;
   }
 }

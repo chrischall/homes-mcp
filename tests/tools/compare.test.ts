@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { FetchproxyTimeoutError } from '@fetchproxy/server';
 import type { HomesClient } from '../../src/client.js';
 import { buildSummary, registerCompareTools } from '../../src/tools/compare.js';
 import { createTestHarness, parseToolResult } from '../helpers.js';
@@ -195,5 +196,45 @@ describe('homes_compare_properties tool', () => {
     expect(parsed.results[0].property?.price).toBe(500_000);
     expect(parsed.results[1].error).toMatch(/boom/);
     expect(parsed.results[2].property?.price).toBe(500_000);
+  });
+
+  it('surfaces bridge timeouts as a distinct error string (round-3 #78)', async () => {
+    // Compare caps inputs at 8 so the BRIDGE_CONCURRENCY (=6) bound
+    // rarely binds, but the distinct-timeout wrapper still matters —
+    // a bridge timeout on row 2 of an 8-row compare must not look
+    // like a parse error or "no listing". Path-keyed so concurrent
+    // fan-out order doesn't affect which row gets the timeout.
+    let i = 0;
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      if (path === '/property/foo/b/') {
+        // Both first attempt + retry throw → row 1 surfaces
+        // 'bridge timeout after retry: …'.
+        throw new FetchproxyTimeoutError({
+          url: 'https://homes.com/',
+          timeoutMs: 12000,
+        });
+      }
+      i++;
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        '@id': `https://www.homes.com/property/foo/id-${i}/`,
+        url: `https://www.homes.com/property/foo/id-${i}/`,
+        offers: { price: 500_000 },
+        mainEntity: { address: { streetAddress: `${i} Main` } },
+      });
+    });
+    const r = await harness.callTool('homes_compare_properties', {
+      targets: [
+        { url: '/property/foo/a/' },
+        { url: '/property/foo/b/' },
+        { url: '/property/foo/c/' },
+      ],
+    });
+    const parsed = parseToolResult<{
+      results: Array<{ error?: string; property?: unknown }>;
+    }>(r);
+    expect(parsed.results[0].property).toBeTruthy();
+    expect(parsed.results[1].error).toMatch(/^bridge timeout after retry:/);
+    expect(parsed.results[2].property).toBeTruthy();
   });
 });

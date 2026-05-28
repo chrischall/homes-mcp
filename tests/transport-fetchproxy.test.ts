@@ -4,6 +4,41 @@
 // What this file covers is the homes-mcp-shaped surface: URL/subdomain
 // routing, BridgeStatus mapping, error pass-through, and start/close.
 import { describe, it, expect, vi } from 'vitest';
+
+// Capture FetchproxyServer constructor args so we can assert that
+// FetchproxyTransport opts into proactive keepalive (fetchproxy#71 /
+// homes-mcp#51). The mock has to be declared before the SUT import.
+const fetchproxyCtorArgs: unknown[] = [];
+vi.mock('@fetchproxy/server', async () => {
+  const actual =
+    await vi.importActual<typeof import('@fetchproxy/server')>(
+      '@fetchproxy/server'
+    );
+  class StubFetchproxyServer {
+    constructor(opts: unknown) {
+      fetchproxyCtorArgs.push(opts);
+    }
+    async listen(): Promise<void> {}
+    async close(): Promise<void> {}
+    async request(): Promise<{ status: number; body: string; url: string }> {
+      return { status: 200, body: '', url: '' };
+    }
+    bridgeHealth(): unknown {
+      return {
+        role: 'host',
+        port: 37149,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastFailureReason: null,
+        consecutiveFailures: 0,
+        lastExtensionMessageAt: null,
+      };
+    }
+    role = 'host' as const;
+  }
+  return { ...actual, FetchproxyServer: StubFetchproxyServer };
+});
+
 import {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
@@ -208,6 +243,19 @@ describe('FetchproxyTransport', () => {
       // just successes). Forwarded through unchanged from bridgeHealth().
       lastExtensionMessageAt: 333,
     });
+  });
+
+  // fetchproxy#71 / homes-mcp#51: opt into the server's proactive
+  // keepalive so the MV3 service worker stays resident across the
+  // human-paced gaps between MCP turns. The exact value matches our
+  // adapter's hard-coded choice (25s — below Chrome's 30s SW idle
+  // timeout, and ~5x below the 60s ping_interval cap).
+  it('opts into FetchproxyServer keepAliveIntervalMs=25_000 (fetchproxy#71 / homes-mcp#51)', () => {
+    fetchproxyCtorArgs.length = 0;
+    new FetchproxyTransport({ version: '0.0.0' });
+    expect(fetchproxyCtorArgs).toHaveLength(1);
+    const opts = fetchproxyCtorArgs[0] as { keepAliveIntervalMs?: number };
+    expect(opts.keepAliveIntervalMs).toBe(25_000);
   });
 
   it('status().role reflects whatever role bridgeHealth() reports (null pre-listen)', () => {
