@@ -15,6 +15,13 @@ import {
   extractPropertyId,
   type JsonLdListingItem,
 } from './search.js';
+import {
+  SMARTSEARCH_AUTOCOMPLETE_PATH,
+  buildAutocompleteBody,
+  extractAddressCandidates,
+  type SmartsearchCandidate,
+  type SmartsearchResponse,
+} from './typeahead.js';
 
 /**
  * `homes_get_by_address` — resolve a free-text address into a canonical
@@ -61,12 +68,14 @@ export interface ByAddressResolved {
   street_address: string;
   resolved: true;
   /**
-   * Which rung resolved the address. `'slug'` — direct
-   * `/<address-slug>/` hit. `'search_fallback'` — city/zip search-page
-   * fuzzy match (#47). Lets callers see whether they got a precise
-   * routing hit or a corpus-search guess.
+   * Which rung resolved the address. `'typeahead'` — structured
+   * smartsearch autocomplete hit (#55, the primary rung). `'slug'` —
+   * direct `/<address-slug>/` routing hit. `'search_fallback'` —
+   * city/zip search-page fuzzy match (#47). Lets callers see whether
+   * they got the structured-API match, a precise routing hit, or a
+   * corpus-search guess.
    */
-  matched_via: 'slug' | 'search_fallback';
+  matched_via: 'typeahead' | 'slug' | 'search_fallback';
 }
 
 export interface ByAddressUnresolved {
@@ -121,13 +130,41 @@ function asListingItem(listing: DirectListing): JsonLdListingItem {
 }
 
 /**
- * Run the single-address resolution rungs end-to-end. Two rungs in
+ * Minimal client surface the resolver needs: `fetchHtml` for the SSR
+ * slug/search rungs and `fetchJson` for the structured typeahead rung.
+ * `fetchJson` is optional so a `{ fetchHtml }`-only test double still
+ * type-checks — a missing method simply skips the typeahead rung.
+ */
+export interface ResolveClient {
+  fetchHtml: (path: string) => Promise<string>;
+  fetchJson?: <T>(
+    path: string,
+    init?: {
+      method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+      headers?: Record<string, string>;
+      body?: unknown;
+    }
+  ) => Promise<T>;
+}
+
+/**
+ * Run the single-address resolution rungs end-to-end. Three rungs in
  * sequence:
  *
+ *   0. **Typeahead rung (#55, PRIMARY).** POST the joined address to the
+ *      structured smartsearch autocomplete endpoint
+ *      (`/routes/res/consumer/smartsearch/autocomplete/`) and verify
+ *      each candidate's street (+ unit) against the input with the
+ *      whole-token matcher. The candidates carry the REAL detail URL
+ *      (`/property/<slug>/<hash>/`) + opaque hash, so a verified match
+ *      resolves precisely. This replaces the slug rung's URL guessing,
+ *      which 404s for many real listings → false "no listing found".
+ *      A throw / empty / unverifiable result falls through to the SSR
+ *      rungs cleanly.
  *   1. **Slug rung.** Slugify `{address, city, state, zip}` →
- *      `GET /<slug>/`. The common hit; routes to a collection or
+ *      `GET /<slug>/`. Retained as fallback; routes to a collection or
  *      detail page on success.
- *   2. **Search-fallback rung (#47).** When the slug rung returns no
+ *   2. **Search-fallback rung (#47).** When the rungs above return no
  *      listing (404, empty collection, no JSON-LD), fall through to
  *      the city/zip search page (the same path shape `search.ts`
  *      builds via `buildSearchPath`), then address-fuzzy-match the
@@ -147,19 +184,40 @@ function asListingItem(listing: DirectListing): JsonLdListingItem {
  * canonical-URL caller can treat the row as "not on this site"
  * rather than a system failure — the existing parity contract for
  * generic `Error('network down')`-style failures is preserved. The
- * opt-in applies to both rungs — a bridge timeout in the slug rung
- * rethrows before the fallback rung fires, and a bridge timeout in
- * the fallback rung rethrows too.
+ * opt-in applies to every rung — a bridge timeout in any rung rethrows
+ * before the next rung fires.
  */
 export interface ResolveOneAddressOpts {
   rethrowBridgeErrors?: boolean;
 }
 
 export async function resolveOneAddress(
-  client: { fetchHtml: (path: string) => Promise<string> },
+  client: ResolveClient,
   input: ByAddressInput,
   opts: ResolveOneAddressOpts = {}
 ): Promise<ByAddressResult> {
+  // Rung 0: structured smartsearch typeahead (#55) — the primary rung.
+  // Routes around the slug rung's URL guessing that 404s real listings.
+  if (typeof client.fetchJson === 'function') {
+    try {
+      const resp = await client.fetchJson<SmartsearchResponse>(
+        SMARTSEARCH_AUTOCOMPLETE_PATH,
+        { method: 'POST', body: buildAutocompleteBody(input) }
+      );
+      const match = resolveByTypeahead(resp, input);
+      if (match.resolved) return match;
+    } catch (err) {
+      if (
+        opts.rethrowBridgeErrors &&
+        (err instanceof FetchproxyTimeoutError ||
+          err instanceof FetchproxyBridgeDownError)
+      ) {
+        throw err;
+      }
+      // Fall through to the slug rung.
+    }
+  }
+
   // Rung 1: slug.
   const slugPath = buildAddressSearchPath(input);
   try {
@@ -212,7 +270,7 @@ const TIMED_OUT: ByAddressUnresolved = { resolved: false, error: 'timeout' };
  * waiting on it.
  */
 export async function resolveOneAddressDeadlined(
-  client: { fetchHtml: (path: string) => Promise<string> },
+  client: ResolveClient,
   input: ByAddressInput,
   deadlineMs: number = SINGLE_RESOLVE_DEADLINE_MS,
   opts: ResolveOneAddressOpts = {}
@@ -244,7 +302,7 @@ function buildFallbackLocation(input: ByAddressInput): string | null {
 
 export function resolveListing(
   html: string,
-  matchedVia: 'slug' | 'search_fallback' = 'slug'
+  matchedVia: 'typeahead' | 'slug' | 'search_fallback' = 'slug'
 ): ByAddressResult {
   const doc = extractJsonLd(html);
   if (!doc) return UNRESOLVED;
@@ -333,6 +391,72 @@ function resolveBySearchFallback(
   };
 }
 
+/**
+ * Verify the structured smartsearch candidates against the input and
+ * pick the matching one (#55). Reuses the same whole-token street
+ * matcher the search-fallback rung uses (street-number guard + strict-
+ * majority token overlap), then layers a UNIT guard on top: if the
+ * input names a unit (`Unit 1601`, `#1601`, `Apt 1601`, …), the chosen
+ * candidate MUST carry that exact unit — multi-unit buildings return
+ * one candidate per unit, and accepting a neighbour unit would point a
+ * tracker at the wrong condo. Returns the canonical `'no listing found'`
+ * sentinel when nothing verifies (no URL leak).
+ */
+function resolveByTypeahead(
+  resp: SmartsearchResponse | null | undefined,
+  input: ByAddressInput
+): ByAddressResult {
+  const candidates = extractAddressCandidates(resp);
+  if (candidates.length === 0) return UNRESOLVED;
+
+  const wanted = streetTokens(input.address);
+  if (wanted.size === 0) return UNRESOLVED;
+  const wantNum = firstNumericToken(input.address);
+  const wantUnit = unitToken(input.address);
+
+  let best: { candidate: SmartsearchCandidate; score: number } | null = null;
+  for (const c of candidates) {
+    // The candidate's street line for token comparison: prefer the
+    // structured `street` (+ explicit `unit`), falling back to the
+    // display name. The display already folds in the unit.
+    const candidateLine = c.street
+      ? `${c.street} ${c.unit ?? ''}`.trim()
+      : c.display;
+    const got = streetTokens(candidateLine);
+    if (got.size === 0) continue;
+
+    // Street-number guard — same as the search-fallback rung.
+    const gotNum = firstNumericToken(c.street ?? c.display);
+    if (wantNum && gotNum && wantNum !== gotNum) continue;
+
+    // Unit guard. If the input names a unit, the candidate must carry
+    // the same one (from the structured `unit` field or its display).
+    if (wantUnit) {
+      const gotUnit = c.unit ? c.unit.toLowerCase() : unitToken(c.display);
+      if (!gotUnit || gotUnit !== wantUnit) continue;
+    }
+
+    let overlap = 0;
+    for (const t of wanted) if (got.has(t)) overlap += 1;
+    const score = overlap / wanted.size;
+    if (!best || score > best.score) best = { candidate: c, score };
+  }
+
+  // Strict-majority overlap, same bar as the search-fallback rung.
+  if (!best || best.score <= 0.5) return UNRESOLVED;
+  const c = best.candidate;
+  const street = c.street ?? c.display.split(',')[0] ?? '';
+  return {
+    url: c.url.startsWith('http')
+      ? c.url.replace(/[?#].*$/, '')
+      : `https://www.homes.com${c.url.replace(/[?#].*$/, '')}`,
+    property_hash: c.property_hash,
+    street_address: street,
+    resolved: true,
+    matched_via: 'typeahead',
+  };
+}
+
 function streetTokens(street: string): Set<string> {
   return new Set(
     street
@@ -349,6 +473,17 @@ function firstNumericToken(street: string): string | null {
   return m ? m[0] : null;
 }
 
+/**
+ * Extract the unit/apt designator from an address line, lowercased, or
+ * null. Matches `Unit 1601`, `Apt 4B`, `Ste 200`, `# 3`, `#1601`. Used
+ * by the typeahead verifier to keep multi-unit candidates from
+ * collapsing onto the wrong unit.
+ */
+function unitToken(line: string): string | null {
+  const m = line.match(/(?:\b(?:unit|apt|apartment|ste|suite|no)\b\.?\s*|#\s*)([a-z0-9-]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 export function registerByAddressTools(
   server: McpServer,
   client: HomesClient
@@ -358,7 +493,7 @@ export function registerByAddressTools(
     {
       title: 'Resolve a street address to a homes.com property URL',
       description:
-        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Slugifies the parts into homes.com's location-routing format and parses the embedded Schema.org JSON-LD — handles both the search-results shape (CollectionPage with matching listings) and the detail-page redirect (single RealEstateListing). On a slug miss, falls back to a city/zip search page and fuzzy-matches street tokens (rural/locality-mismatched addresses). Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODES: (a) rural addresses and very-new construction often miss because homes.com hasn't indexed them yet, (b) the resolver picks the FIRST listing on a collection redirect — if homes.com returns multiple loose matches, you may get a wrong-but-plausible neighbour. Compare the returned `street_address` against your input to catch this. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
+        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Resolve a street address to a homes.com property URL',
         readOnlyHint: true,

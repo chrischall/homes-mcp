@@ -68,7 +68,11 @@ describe('buildAddressSearchPath', () => {
 describe('homes_get_by_address tool', () => {
   let harness: Awaited<ReturnType<typeof createTestHarness>>;
   const mockFetchHtml = vi.fn();
-  const mockClient = { fetchHtml: mockFetchHtml } as unknown as HomesClient;
+  const mockFetchJson = vi.fn();
+  const mockClient = {
+    fetchHtml: mockFetchHtml,
+    fetchJson: mockFetchJson,
+  } as unknown as HomesClient;
 
   beforeAll(async () => {
     harness = await createTestHarness((server) =>
@@ -132,10 +136,44 @@ describe('homes_get_by_address tool', () => {
     },
   });
 
+  // Build a smartsearch autocomplete response (the structured typeahead
+  // rung). Shape mirrors the real captured response (see typeahead.ts).
+  const smartsearch = (
+    places: Array<{ n: string; u: string; key: string; unit?: string }>
+  ) => ({
+    suggestions: {
+      places: places.map((p) => ({
+        n: p.n,
+        u: p.u,
+        g: {
+          k: { key: p.key },
+          d: p.n,
+          t: 8,
+          a: { street: p.n.split(',')[0], unit: p.unit },
+        },
+        s: 'Address',
+        sts: 0,
+      })),
+      neighborhoods: [],
+      schools: [],
+      buildings: [],
+      agents: [],
+      newhomes: [],
+    },
+  });
+
   // Reset between tests — the fallback rung makes a 2nd fetchHtml call
   // when the slug rung returns UNRESOLVED, so single-`mockResolvedValueOnce`
   // tests need a clean queue to avoid leaking prior responses.
-  beforeEach(() => mockFetchHtml.mockReset());
+  //
+  // Default the structured typeahead rung (rung 0) to "no candidates" so
+  // every existing slug / search-fallback test exercises the SSR rungs
+  // exactly as before; per-test overrides drive the typeahead rung.
+  beforeEach(() => {
+    mockFetchHtml.mockReset();
+    mockFetchJson.mockReset();
+    mockFetchJson.mockResolvedValue({ suggestions: { places: [] } });
+  });
 
   it('hits the address-slug path and resolves to the first listing', async () => {
     mockFetchHtml.mockResolvedValueOnce(
@@ -439,6 +477,206 @@ describe('homes_get_by_address tool', () => {
     });
   });
 
+  // ── Structured smartsearch typeahead rung (#55) ─────────────────────
+  //
+  // The PRIMARY rung. The legacy slug rung guessed
+  // `/<addr-slug>-<city>-<state>-<zip>/` URLs that 404 for many real,
+  // indexed listings → a false "no listing found". The live search box
+  // resolves through `POST /routes/res/consumer/smartsearch/autocomplete/`
+  // (term-keyed JSON), whose candidates carry the REAL detail URL
+  // `/property/<slug>/<hash>/` + the opaque hash. Fixtures below are the
+  // real captured shapes (see typeahead.test.ts / typeahead.ts header).
+  describe('structured smartsearch typeahead rung', () => {
+    it('resolves via the autocomplete endpoint before any slug/search fetch', async () => {
+      mockFetchJson.mockResolvedValueOnce(
+        smartsearch([
+          {
+            n: '126 Sleeping Bear Ln, Lake Lure, NC',
+            u: '/property/126-sleeping-bear-ln-lake-lure-nc/typehash1/',
+            key: 'typehash1',
+          },
+        ])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      expect(r.isError).toBeFalsy();
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({
+        url: 'https://www.homes.com/property/126-sleeping-bear-ln-lake-lure-nc/typehash1/',
+        property_hash: 'typehash1',
+        street_address: '126 Sleeping Bear Ln',
+        resolved: true,
+        matched_via: 'typeahead',
+      });
+      // The structured rung short-circuits the SSR rungs entirely.
+      expect(mockFetchHtml).not.toHaveBeenCalled();
+      // It POSTed to the smartsearch endpoint with the term body.
+      const [calledPath, init] = mockFetchJson.mock.calls[0];
+      expect(calledPath).toBe(
+        '/routes/res/consumer/smartsearch/autocomplete/'
+      );
+      expect(init.method).toBe('POST');
+      expect(init.body.term).toBe('126 sleeping bear ln lake lure nc 28746');
+    });
+
+    it('CRITICAL #55: resolves 158 Raven Blvd to its real /property/<slug>/<hash>/ URL', async () => {
+      // Real false-negative from the field report — the slug rung 404s,
+      // so this MUST resolve through the structured rung. Captured live.
+      mockFetchJson.mockResolvedValueOnce(
+        smartsearch([
+          {
+            n: '158 Raven Blvd, Lake Lure, NC',
+            u: '/property/158-raven-blvd-lake-lure-nc/yhepckbpqstf1/',
+            key: 'yhepckbpqstf1',
+          },
+        ])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '158 Raven Blvd',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('typeahead');
+        expect(parsed.property_hash).toBe('yhepckbpqstf1');
+        expect(parsed.url).toBe(
+          'https://www.homes.com/property/158-raven-blvd-lake-lure-nc/yhepckbpqstf1/'
+        );
+      }
+    });
+
+    it('CRITICAL #55: resolves 155 Quail Cove Blvd Unit 1601 to the matching unit, not a neighbour unit', async () => {
+      // Multi-unit building — the live autocomplete returns several units
+      // for "155 Quail Cove Blvd". The whole-token verifier must pick the
+      // one carrying the "1601" unit token, not the first candidate.
+      mockFetchJson.mockResolvedValueOnce(
+        smartsearch([
+          {
+            n: '155 Quail Cove Blvd Unit 1603, Lake Lure, NC',
+            u: '/property/155-quail-cove-blvd-lake-lure-nc-unit-1603/0p8h9n2dr1vv0/',
+            key: '0p8h9n2dr1vv0',
+            unit: '1603',
+          },
+          {
+            n: '155 Quail Cove Blvd Unit 1601, Lake Lure, NC',
+            u: '/property/155-quail-cove-blvd-lake-lure-nc-unit-1601/lgt0s6vpv9cln/',
+            key: 'lgt0s6vpv9cln',
+            unit: '1601',
+          },
+        ])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '155 Quail Cove Blvd Unit 1601',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('typeahead');
+        expect(parsed.property_hash).toBe('lgt0s6vpv9cln');
+        expect(parsed.url).toBe(
+          'https://www.homes.com/property/155-quail-cove-blvd-lake-lure-nc-unit-1601/lgt0s6vpv9cln/'
+        );
+      }
+    });
+
+    it('NEGATIVE: rejects a wrong-street typeahead candidate (no token overlap) → falls through to slug, then unresolved', async () => {
+      // The endpoint sometimes returns a loose / far candidate. The
+      // whole-token verifier must reject it (no URL leak) rather than
+      // accept a wrong-but-plausible neighbour. With the slug + fallback
+      // rungs also empty, the call returns "no listing found".
+      mockFetchJson.mockResolvedValueOnce(
+        smartsearch([
+          {
+            n: '999 Completely Different Rd, Charlotte, NC',
+            u: '/property/999-completely-different-rd-charlotte-nc/wrongwrong1/',
+            key: 'wrongwrong1',
+          },
+        ])
+      );
+      mockFetchHtml.mockResolvedValue('<html>nothing here</html>');
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '158 Raven Blvd',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      expect(r.isError).toBeFalsy();
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
+    });
+
+    it('NEGATIVE: rejects a wrong-unit-only typeahead candidate (street matches but unit differs)', async () => {
+      // Only the 1603 unit comes back; the input wants 1601. The unit
+      // mismatch must reject it — accepting it would point a tracker at
+      // the wrong condo. Falls through to the SSR rungs (also empty).
+      mockFetchJson.mockResolvedValueOnce(
+        smartsearch([
+          {
+            n: '155 Quail Cove Blvd Unit 1603, Lake Lure, NC',
+            u: '/property/155-quail-cove-blvd-lake-lure-nc-unit-1603/0p8h9n2dr1vv0/',
+            key: '0p8h9n2dr1vv0',
+            unit: '1603',
+          },
+        ])
+      );
+      mockFetchHtml.mockResolvedValue('<html>nothing here</html>');
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '155 Quail Cove Blvd Unit 1601',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
+    });
+
+    it('falls through to the slug rung when the typeahead endpoint returns no places', async () => {
+      // Default mock already returns empty places; slug rung resolves.
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('slughash', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('slug');
+        expect(parsed.property_hash).toBe('slughash');
+      }
+    });
+
+    it('falls through to the slug rung when the typeahead endpoint throws (WAF/transport)', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(new Error('homes.com error: 403'));
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('slughash2', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) expect(parsed.matched_via).toBe('slug');
+    });
+  });
+
 });
 
 // ── Per-request deadline (#54) ────────────────────────────────────────
@@ -454,10 +692,18 @@ describe('homes_get_by_address tool', () => {
 // drive fake timers without racing the SDK's own request-timeout timer.
 describe('resolveOneAddressDeadlined', () => {
   const dlFetchHtml = vi.fn();
-  const dlClient = { fetchHtml: dlFetchHtml } as unknown as HomesClient;
+  const dlFetchJson = vi.fn();
+  const dlClient = {
+    fetchHtml: dlFetchHtml,
+    fetchJson: dlFetchJson,
+  } as unknown as HomesClient;
 
   beforeEach(() => {
     dlFetchHtml.mockReset();
+    dlFetchJson.mockReset();
+    // Typeahead rung returns no candidates so these timeout/quick tests
+    // exercise the slug rung exactly as before (#54 behaviour).
+    dlFetchJson.mockResolvedValue({ suggestions: { places: [] } });
     vi.useFakeTimers();
   });
   afterEach(() => vi.useRealTimers());

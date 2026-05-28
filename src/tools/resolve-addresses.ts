@@ -53,7 +53,7 @@ interface ResolveRow extends ByAddressInput {
   url?: string;
   property_id?: string;
   street_address?: string;
-  matched_via?: 'slug' | 'search_fallback';
+  matched_via?: 'typeahead' | 'slug' | 'search_fallback';
   error?: string;
 }
 
@@ -78,7 +78,7 @@ export function registerResolveAddressesTools(
     {
       title: 'Bulk-resolve street addresses to homes.com property URLs',
       description:
-        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (slug → city/zip search fallback with street-token fuzzy match). Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'slug'` or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
+        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Bulk-resolve street addresses to homes.com property URLs',
         readOnlyHint: true,
