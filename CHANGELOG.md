@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/chrischall/homes-mcp/compare/v0.9.0...v0.10.0) (2026-05-28)
+
+
+### Features
+
+* **resolve:** add search-fallback rung (closes [#47](https://github.com/chrischall/homes-mcp/issues/47)) ([#50](https://github.com/chrischall/homes-mcp/issues/50)) ([40d2178](https://github.com/chrischall/homes-mcp/commit/40d2178ce161dea4c8bd22cbe8aadebc8d5e8509))
+
+
+### Bug Fixes
+
+* **resolve:** bulk should run same rungs as single (closes [#44](https://github.com/chrischall/homes-mcp/issues/44)) ([#45](https://github.com/chrischall/homes-mcp/issues/45)) ([7b63359](https://github.com/chrischall/homes-mcp/commit/7b63359c431bff9824c09f2a5ebdf99bdf83a8a2))
+
 ## [0.9.0](https://github.com/chrischall/homes-mcp/compare/v0.8.0...v0.9.0) (2026-05-27)
 
 
