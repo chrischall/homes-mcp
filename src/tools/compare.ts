@@ -50,6 +50,8 @@ const SUMMARY_FIELDS: Array<keyof FormattedProperty> = [
   'beds',
   'baths',
   'sqft',
+  'lot_size_sqft',
+  'lot_size_acres',
   'year_built',
   'status',
   'hoa_fee',
@@ -78,7 +80,7 @@ export function registerCompareTools(
     {
       title: 'Compare homes.com properties side-by-side',
       description:
-        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
+        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, `lot_size_sqft` + the derived `lot_size_acres`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
       annotations: {
         title: 'Compare homes.com properties side-by-side',
         readOnlyHint: true,
