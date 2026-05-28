@@ -100,3 +100,36 @@ export function isTaxSentinel(value: number | undefined): boolean {
   if (typeof value !== 'number') return false;
   return value < 10;
 }
+
+/** Square feet in one acre (US survey acre). */
+export const SQFT_PER_ACRE = 43_560;
+
+/**
+ * Convert a lot size in square feet to acres, rounded to 2 decimals —
+ * `round(sqft / 43560, 2)`. Acreage is the unit that matters for
+ * rural / mountain / land listings, so every property record carries it
+ * alongside the raw `lot_size_sqft` (#82).
+ *
+ * This is the canonical guarded contract standardized across the
+ * real-estate MCP cohort (realty-mcp#7, redfin #81, zillow #93,
+ * compass #81, onehome #49). Null-safe by design: returns `null` for
+ * any non-positive, missing, or non-finite input (condos with no lot,
+ * absent data, NaN) — never `0`, so callers can tell "no lot" apart
+ * from a real "0 acre" lot. A positive lot too small to round to a
+ * non-zero 2dp acreage (< ~218 sqft) also collapses to `null`, NOT 0,
+ * so a non-null result is always > 0.
+ *
+ * @example lotSizeAcres(45_738) // 1.05
+ * @example lotSizeAcres(13_503) // 0.31
+ * @example lotSizeAcres(200)    // null (rounds to 0.00 → null, never 0)
+ * @example lotSizeAcres(null)   // null
+ */
+export function lotSizeAcres(
+  sqft: number | undefined | null
+): number | null {
+  if (typeof sqft !== 'number' || !Number.isFinite(sqft) || sqft <= 0) {
+    return null;
+  }
+  const acres = Math.round((sqft / SQFT_PER_ACRE) * 100) / 100;
+  return acres > 0 ? acres : null;
+}

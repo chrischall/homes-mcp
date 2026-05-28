@@ -11,6 +11,7 @@ import {
   daysSince,
   hoaToMonthlyUsd,
   isTaxSentinel,
+  lotSizeAcres,
 } from '../src/format.js';
 
 describe('buildPortalUrlHyperlink', () => {
@@ -105,5 +106,39 @@ describe('isTaxSentinel', () => {
   });
   it('returns false for undefined (no value to flag)', () => {
     expect(isTaxSentinel(undefined)).toBe(false);
+  });
+});
+
+describe('lotSizeAcres', () => {
+  // Canonical guarded conversion shared across the real-estate MCP
+  // cohort (realty-mcp#7, redfin #81, zillow #93, compass #81,
+  // onehome #49; homes #82). round(sqft / 43560, 2), null-safe.
+  it('45,738 sq ft → 1.05 acres', () => {
+    // 45738 / 43560 = 1.0499… → rounds to 1.05
+    expect(lotSizeAcres(45_738)).toBe(1.05);
+  });
+  it('13,503 sq ft → 0.31 acres', () => {
+    expect(lotSizeAcres(13_503)).toBe(0.31);
+  });
+  it('94,089 sq ft → 2.16 acres', () => {
+    expect(lotSizeAcres(94_089)).toBe(2.16);
+  });
+  it('43,560 sq ft → exactly 1.0 acre', () => {
+    expect(lotSizeAcres(43_560)).toBe(1.0);
+  });
+  it('a tiny lot too small to round to a non-zero 2dp → null (never 0)', () => {
+    // 200 / 43560 = 0.0046… → rounds to 0.00. The invariant is that a
+    // non-null result is always > 0, so this collapses to null, NOT 0.
+    expect(lotSizeAcres(200)).toBeNull();
+  });
+  it('non-positive → null', () => {
+    expect(lotSizeAcres(0)).toBeNull();
+    expect(lotSizeAcres(-1)).toBeNull();
+  });
+  it('missing / non-finite → null', () => {
+    expect(lotSizeAcres(undefined)).toBeNull();
+    expect(lotSizeAcres(null)).toBeNull();
+    expect(lotSizeAcres(NaN)).toBeNull();
+    expect(lotSizeAcres(Infinity)).toBeNull();
   });
 });

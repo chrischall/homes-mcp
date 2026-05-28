@@ -21,6 +21,7 @@ import {
   daysSince,
   hoaToMonthlyUsd,
   isTaxSentinel,
+  lotSizeAcres,
 } from '../format.js';
 import {
   normalizeEvents,
@@ -176,8 +177,17 @@ export interface FormattedProperty {
   hoa_monthly_usd?: number | null;
   /** Raw `frequency` string when the DOM exposed one (e.g. "month", "year"). */
   hoa_frequency?: string;
+  /** Raw lot size in square feet, scraped from the "Lot Details"
+   * section. Absent for condos / listings with no public lot. */
   lot_size_sqft?: number;
-  lot_size_acres?: number;
+  /**
+   * `round(lot_size_sqft / 43560, 2)` — lot size in acres, the unit
+   * that matters for rural / mountain / land listings. `null` (never
+   * `0`) when `lot_size_sqft` is absent, non-positive, or too small to
+   * round to a non-zero 2dp acreage. Same guarded contract across the
+   * real-estate MCP family (#82).
+   */
+  lot_size_acres?: number | null;
   parking?: string;
   heating?: string;
   cooling?: string;
@@ -431,6 +441,12 @@ export function format(
   out.price_drop_amount = drop.amount;
   out.price_drop_percent = drop.percent;
 
+  // #82: derived lot_size_acres. Always present (null when there's no
+  // lot or it's too small to round to a non-zero 2dp acreage) so the
+  // unit that matters for land listings is on every record without the
+  // caller redoing the math. Same guarded contract as the cohort.
+  out.lot_size_acres = lotSizeAcres(out.lot_size_sqft);
+
   // #17: Null out tax_annual sentinel placeholders. The flag stays so
   // callers can tell "no data" apart from "real $0" later.
   if (isTaxSentinel(out.tax_annual ?? undefined)) {
@@ -492,7 +508,7 @@ export function registerPropertyTools(
     {
       title: 'Get homes.com property details',
       description:
-        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot size, parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
+        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot_size_sqft plus the derived lot_size_acres (round(lot_size_sqft / 43560, 2); both null — never 0 — for condos and listings with no lot), parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Get homes.com property details',
         readOnlyHint: true,
@@ -655,18 +671,16 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
   const alts = collectAddressAlternates(root);
   if (alts.length > 0) out.address_alternates = alts;
 
-  // Lot Details — accept "X acres / Y sqft" or "Y sqft" or "X acres".
+  // Lot Details — capture the raw square footage from "X acres / Y
+  // sqft" or "Y sqft". The acreage is DERIVED from this sqft in
+  // format() via the cohort-standard guarded conversion (#82), not
+  // read off the page text, so cross-MCP lot-size math is consistent.
   const lotText = findDivTextAfterHeading(root, 'Lot Details');
   if (lotText) {
     const sqft = /([0-9,]+)\s*sqft/i.exec(lotText);
     if (sqft) {
       const n = parseIntegerLoose(sqft[1]);
       if (n !== undefined) out.lot_size_sqft = n;
-    }
-    const acres = /([0-9.]+)\s*acres?/i.exec(lotText);
-    if (acres) {
-      const n = Number(acres[1]);
-      if (Number.isFinite(n)) out.lot_size_acres = n;
     }
   }
 

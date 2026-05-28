@@ -190,6 +190,41 @@ describe('format', () => {
     expect(out.brokerage).toBe('Solo Realty');
     expect(out.listing_agent).toBeUndefined();
   });
+
+  // #82: derived lot_size_acres — round(lot_size_sqft / 43560, 2),
+  // null-safe (never 0). lot_size_sqft is scraped from the "Lot Details"
+  // DOM section; the acreage is derived from it, not the raw page text.
+  const htmlWithLot = (lotText: string | null) =>
+    `<html><body>${
+      lotText === null ? '' : `<h3>Lot Details</h3><div>${lotText}</div>`
+    }</body></html>`;
+
+  it('derives lot_size_acres from the scraped sqft (45,738 → 1.05)', () => {
+    const out = format(
+      { url: 'https://www.homes.com/property/x/abc/', mainEntity: {} },
+      htmlWithLot('45,738 sqft')
+    );
+    expect(out.lot_size_sqft).toBe(45_738);
+    expect(out.lot_size_acres).toBe(1.05);
+  });
+
+  it('a tiny lot rounds to null acres, never 0 — but keeps lot_size_sqft', () => {
+    const out = format(
+      { url: 'https://www.homes.com/property/x/abc/', mainEntity: {} },
+      htmlWithLot('200 sqft')
+    );
+    expect(out.lot_size_sqft).toBe(200);
+    expect(out.lot_size_acres).toBeNull();
+  });
+
+  it('condo / missing Lot Details → both lot_size_sqft and lot_size_acres null', () => {
+    const out = format(
+      { url: 'https://www.homes.com/property/x/abc/', mainEntity: {} },
+      htmlWithLot(null)
+    );
+    expect(out.lot_size_sqft).toBeUndefined();
+    expect(out.lot_size_acres).toBeNull();
+  });
 });
 
 describe('homes_get_property tool', () => {
