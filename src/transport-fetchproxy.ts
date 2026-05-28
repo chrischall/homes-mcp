@@ -72,6 +72,8 @@ export class FetchproxyTransport implements HomesTransport {
       // Subdomains of homes.com (www, photos, etc.) match automatically.
       domains: ['homes.com'],
       fetchTimeoutMs: this.fetchTimeoutMs,
+      // fetchproxy#71 — keep SW resident across human-paced session gaps
+      keepAliveIntervalMs: 25_000,
       ...(opts.bridgeReviveDelayMs !== undefined
         ? { bridgeReviveDelayMs: opts.bridgeReviveDelayMs }
         : {}),
