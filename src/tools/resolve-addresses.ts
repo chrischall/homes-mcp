@@ -57,8 +57,17 @@ interface ResolveRow extends ByAddressInput {
   error?: string;
 }
 
+/**
+ * Pacing delay between dispatches. `unref`s its timer so that once the
+ * overall deadline has fired and the response is serialized, the workers
+ * still mid-loop in the background can't keep the event loop alive
+ * stepping every `DISPATCH_PACING_MS`.
+ */
 const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+  new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (typeof t === 'object' && typeof t.unref === 'function') t.unref();
+  });
 
 export function registerResolveAddressesTools(
   server: McpServer,
@@ -166,25 +175,34 @@ export function registerResolveAddressesTools(
       // Bounded worker pool with paced dispatch (mirrors redfin/zillow).
       // A shared cursor keeps at most BRIDGE_CONCURRENCY (=6) fetches in
       // flight continuously — a slow row never starves the others behind
-      // it the way barrier-synced chunks would — and each new dispatch is
-      // staggered by a short beat so a 60-address batch can't stampede
-      // the bridge into timeouts (round-3 #78). The whole sweep races the
-      // overall deadline: on timeout we return whatever's settled so far,
-      // with the rest left as their seeded `'pending'` markers.
+      // it the way barrier-synced chunks would. The pool fills up front
+      // (so a healthy batch runs at full concurrency), then each worker's
+      // *subsequent* dispatch is spaced through a shared "next allowed
+      // dispatch" clock — so as fast rows free up workers, refills trickle
+      // out ~DISPATCH_PACING_MS apart instead of re-stampeding the bridge
+      // all at once (round-3 #78). The whole sweep races the overall
+      // deadline: on timeout we return whatever's settled so far, with the
+      // rest left as their seeded `'pending'` markers.
       const fanOut = (async () => {
-        let cursor = 0;
-        const worker = async (): Promise<void> => {
+        const poolSize = Math.min(BRIDGE_CONCURRENCY, ts.length);
+        let cursor = poolSize; // first `poolSize` indices fill the pool
+        let nextRefillAt = 0;
+        const worker = async (firstIndex: number): Promise<void> => {
+          await resolveInto(firstIndex);
           while (cursor < ts.length) {
             const index = cursor++;
-            if (index > 0) await sleep(DISPATCH_PACING_MS);
+            // Stagger refills on a shared clock so freed workers don't
+            // all re-dispatch on the same tick.
+            const now = Date.now();
+            const wait = Math.max(0, nextRefillAt - now);
+            nextRefillAt = Math.max(now, nextRefillAt) + DISPATCH_PACING_MS;
+            if (wait > 0) await sleep(wait);
             await resolveInto(index);
           }
         };
-        const workers = Array.from(
-          { length: Math.min(BRIDGE_CONCURRENCY, ts.length) },
-          () => worker()
+        await Promise.all(
+          Array.from({ length: poolSize }, (_, i) => worker(i))
         );
-        await Promise.all(workers);
       })();
 
       await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
