@@ -217,13 +217,22 @@ describe('format', () => {
     expect(out.lot_size_acres).toBeNull();
   });
 
-  it('condo / missing Lot Details → both lot_size_sqft and lot_size_acres null', () => {
+  it('condo / missing Lot Details → lot_size_sqft absent, lot_size_acres null', () => {
     const out = format(
       { url: 'https://www.homes.com/property/x/abc/', mainEntity: {} },
       htmlWithLot(null)
     );
     expect(out.lot_size_sqft).toBeUndefined();
     expect(out.lot_size_acres).toBeNull();
+  });
+
+  it('acres-only Lot Details → derives sqft, then canonical acres (0.75 acres → 32670 / 0.75)', () => {
+    const out = format(
+      { url: 'https://www.homes.com/property/x/abc/', mainEntity: {} },
+      htmlWithLot('0.75 acres')
+    );
+    expect(out.lot_size_sqft).toBe(32_670);
+    expect(out.lot_size_acres).toBe(0.75);
   });
 });
 

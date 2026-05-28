@@ -22,6 +22,7 @@ import {
   hoaToMonthlyUsd,
   isTaxSentinel,
   lotSizeAcres,
+  SQFT_PER_ACRE,
 } from '../format.js';
 import {
   normalizeEvents,
@@ -672,15 +673,28 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
   if (alts.length > 0) out.address_alternates = alts;
 
   // Lot Details — capture the raw square footage from "X acres / Y
-  // sqft" or "Y sqft". The acreage is DERIVED from this sqft in
-  // format() via the cohort-standard guarded conversion (#82), not
-  // read off the page text, so cross-MCP lot-size math is consistent.
+  // sqft", "Y sqft", or an acres-only "X acres" (vacant-land / rural
+  // listings that render just the acreage). We always land on a
+  // canonical lot_size_sqft: prefer the displayed sqft, else derive it
+  // from the acreage (round(acres * 43560)). The acreage itself is then
+  // DERIVED back from that sqft in format() via the cohort-standard
+  // guarded conversion (#82), not read off the page text, so cross-MCP
+  // lot-size math (and acres rounding) is consistent.
   const lotText = findDivTextAfterHeading(root, 'Lot Details');
   if (lotText) {
     const sqft = /([0-9,]+)\s*sqft/i.exec(lotText);
     if (sqft) {
       const n = parseIntegerLoose(sqft[1]);
       if (n !== undefined) out.lot_size_sqft = n;
+    } else {
+      // Acres-only: "0.75 acres" / "0.75 Acre" / "1.05 ac".
+      const acres = /([0-9]+(?:\.[0-9]+)?)\s*(?:acres?|ac)\b/i.exec(lotText);
+      if (acres) {
+        const a = Number(acres[1]);
+        if (Number.isFinite(a) && a > 0) {
+          out.lot_size_sqft = Math.round(a * SQFT_PER_ACRE);
+        }
+      }
     }
   }
 
