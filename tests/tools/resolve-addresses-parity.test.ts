@@ -35,7 +35,11 @@ import { createTestHarness, parseToolResult } from '../helpers.js';
  */
 
 const mockFetchHtml = vi.fn();
-const mockClient = { fetchHtml: mockFetchHtml } as unknown as HomesClient;
+const mockFetchJson = vi.fn();
+const mockClient = {
+  fetchHtml: mockFetchHtml,
+  fetchJson: mockFetchJson,
+} as unknown as HomesClient;
 
 let single: Awaited<ReturnType<typeof createTestHarness>>;
 let bulk: Awaited<ReturnType<typeof createTestHarness>>;
@@ -52,7 +56,13 @@ afterAll(async () => {
   await single?.close();
   await bulk?.close();
 });
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Default the structured typeahead rung (rung 0) to "no candidates"
+  // so the SSR-rung parity tests below exercise the slug / search rungs
+  // exactly as before; the typeahead-parity test overrides it.
+  mockFetchJson.mockResolvedValue({ suggestions: { places: [] } });
+});
 
 const detailHtml = (id: string, streetAddress: string) =>
   `<html><script type="application/ld+json">${JSON.stringify({
@@ -78,7 +88,7 @@ interface SingleOk {
   url: string;
   property_hash: string;
   street_address: string;
-  matched_via: 'slug' | 'search_fallback';
+  matched_via: 'typeahead' | 'slug' | 'search_fallback';
 }
 interface SingleFail {
   resolved: false;
@@ -152,6 +162,65 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
         expect(b.error).toBe(s.error);
       }
     }
+  });
+
+  it('bulk surfaces matched_via:"typeahead" identically to a single call (#55 primary rung)', async () => {
+    // The structured rung is the production primary rung. Both single
+    // and bulk must resolve the SAME address to the SAME real
+    // /property/<slug>/<hash>/ URL via the typeahead rung — no drift.
+    const smartsearch = (street: string, key: string) => ({
+      suggestions: {
+        places: [
+          {
+            n: `${street}, Lake Lure, NC`,
+            u: `/property/${street.toLowerCase().replace(/\s+/g, '-')}-lake-lure-nc/${key}/`,
+            g: { k: { key }, d: `${street}, Lake Lure, NC`, t: 8, a: { street } },
+            s: 'Address',
+            sts: 0,
+          },
+        ],
+      },
+    });
+    const ADDRS_LL = [
+      { address: '158 Raven Blvd', city: 'Lake Lure', state: 'NC', zip: '28746' },
+      { address: '126 Sleeping Bear Ln', city: 'Lake Lure', state: 'NC', zip: '28746' },
+    ];
+    const jsonFor = (body: { term?: string }) => {
+      const term = body?.term ?? '';
+      if (term.startsWith('158 raven blvd'))
+        return smartsearch('158 Raven Blvd', 'yhepckbpqstf1');
+      if (term.startsWith('126 sleeping bear ln'))
+        return smartsearch('126 Sleeping Bear Ln', 'slug126hash');
+      return { suggestions: { places: [] } };
+    };
+    mockFetchJson.mockImplementation(async (_path: string, init: { body?: { term?: string } }) =>
+      jsonFor(init?.body ?? {})
+    );
+
+    const singles: SingleResult[] = [];
+    for (const a of ADDRS_LL) {
+      const r = await single.callTool('homes_get_by_address', a);
+      singles.push(parseToolResult<SingleResult>(r));
+    }
+
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', { addresses: ADDRS_LL })
+    );
+
+    for (let i = 0; i < ADDRS_LL.length; i++) {
+      const s = singles[i];
+      const b = br.results[i];
+      expect(s.resolved).toBe(true);
+      expect(b.resolved).toBe(true);
+      if (s.resolved && b.resolved) {
+        expect(s.matched_via).toBe('typeahead');
+        expect(b.matched_via).toBe('typeahead');
+        expect(b.url).toBe(s.url);
+        expect(b.property_id).toBe(s.property_hash);
+      }
+    }
+    // The SSR slug rung never fired — typeahead short-circuited it.
+    expect(mockFetchHtml).not.toHaveBeenCalled();
   });
 
   it('bulk surfaces matched_via:"search_fallback" identically to a single call when slug rung misses', async () => {
