@@ -8,10 +8,10 @@ import { createTestHarness, parseToolResult } from '../helpers.js';
  * Parity contract for the resolver rungs.
  *
  * `homes_resolve_addresses` is the bulk sibling of `homes_get_by_address`.
- * Round-3 review (chrischall/homes-mcp#44) called for verifying that bulk
- * paths run the same rungs as their single counterparts — a bulk wrapper
- * that silently drops a fallback or surfaces a different error shape
- * makes the two tools subtly non-interchangeable.
+ * These tests pin the parity contract: bulk must produce the same `resolved`
+ * bit, URL, hash, and graceful-degradation sentinel as a loop over the
+ * single tool — silent drift between the two would make them subtly
+ * non-interchangeable.
  *
  * Contract pinned here:
  *
