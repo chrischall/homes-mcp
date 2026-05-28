@@ -121,9 +121,9 @@ export function registerCompareTools(
       const ts = targets as CompareTarget[];
       // See bulk-get.ts header for the round-3 #78 rationale on
       // BRIDGE_CONCURRENCY + retryOnceOnTimeout + classifyRowError.
-      // Compare caps at 8 targets so the cap rarely binds, but the
-      // distinct-timeout wrapper still matters: a bridge timeout in
-      // row 3 of an 8-row compare must not look like a parse error.
+      // Compare caps at 8 targets so at most 2 rows ever queue, but
+      // the distinct-timeout wrapper still matters: a bridge timeout
+      // in row 3 of an 8-row compare must not look like a parse error.
       const rows: CompareRow[] = await mapWithConcurrency(
         ts,
         BRIDGE_CONCURRENCY,

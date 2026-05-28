@@ -20,9 +20,10 @@ import {
  * `homes_compare_properties` focused on side-by-side analysis (which
  * caps at 8 + carries a summary table); this tool is rows-only.
  *
- * Per-row failures are captured. Fetches are concurrent. Order
- * matches input order — the caller can map a parallel input array of
- * notes/labels directly onto results.
+ * Per-row failures are captured. Fetches are bounded-concurrent
+ * (capped at BRIDGE_CONCURRENCY=6 in-flight). Order matches input
+ * order — the caller can map a parallel input array of notes/labels
+ * directly onto results.
  */
 
 const MAX_URLS = 200;
