@@ -39,11 +39,6 @@ export {
 
 const DEFAULT_PORT = 37_149;
 
-// Homes-mcp keeps the historical default in BridgeStatus.fetchTimeoutMs
-// so the healthcheck JSON stays stable; the server uses the same value
-// as its built-in default.
-const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
-
 export interface FetchproxyTransportOptions {
   port?: number;
   /** MCP server name announced to the extension. Defaults to 'homes-mcp'. */
@@ -60,12 +55,10 @@ export class FetchproxyTransport implements HomesTransport {
   private readonly inner: FetchproxyServer;
   private readonly port: number;
   private readonly serverVersion: string;
-  private readonly fetchTimeoutMs: number;
 
   constructor(opts: FetchproxyTransportOptions) {
     this.port = opts.port ?? DEFAULT_PORT;
     this.serverVersion = opts.version;
-    this.fetchTimeoutMs = opts.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
     const options: FetchproxyServerOpts = {
       port: this.port,
       serverName: opts.server ?? 'homes-mcp',
@@ -101,12 +94,16 @@ export class FetchproxyTransport implements HomesTransport {
 
   /** Diagnostic snapshot of the bridge. Safe to call before start(). */
   status(): BridgeStatus {
+    // 0.9.0+: `bridgeHealth()` is the source of truth for the resolved
+    // per-request timeout — the server tracks the value it actually
+    // applies (override or built-in default), so we just forward it
+    // through instead of re-resolving the default locally.
     const health = this.inner.bridgeHealth();
     return {
       role: health.role,
       port: health.port,
       serverVersion: this.serverVersion,
-      fetchTimeoutMs: this.fetchTimeoutMs,
+      fetchTimeoutMs: health.fetchTimeoutMs,
       lastSuccessAt: health.lastSuccessAt,
       lastFailureAt: health.lastFailureAt,
       lastFailureReason: health.lastFailureReason,
