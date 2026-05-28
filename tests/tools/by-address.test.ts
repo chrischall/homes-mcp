@@ -1,8 +1,18 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  afterAll,
+} from 'vitest';
 import type { HomesClient } from '../../src/client.js';
 import {
   buildAddressSearchPath,
   registerByAddressTools,
+  resolveOneAddressDeadlined,
 } from '../../src/tools/by-address.js';
 import { createTestHarness, parseToolResult } from '../helpers.js';
 
@@ -428,4 +438,92 @@ describe('homes_get_by_address tool', () => {
       expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
     });
   });
+
 });
+
+// ── Per-request deadline (#54) ────────────────────────────────────────
+//
+// Even a single `homes_get_by_address` was observed timing out at the
+// MCP layer (`-32001 Request timed out`) — the per-request path had no
+// effective deadline shorter than the client's, so a hung homes.com
+// fetch wedged the whole connection. `resolveOneAddressDeadlined` now
+// caps the whole resolution and returns a clean `{ resolved: false,
+// error: 'timeout' }` row instead of hanging until the client kills it.
+//
+// Tested at the helper level (not through the MCP harness) so we can
+// drive fake timers without racing the SDK's own request-timeout timer.
+describe('resolveOneAddressDeadlined', () => {
+  const dlFetchHtml = vi.fn();
+  const dlClient = { fetchHtml: dlFetchHtml } as unknown as HomesClient;
+
+  beforeEach(() => {
+    dlFetchHtml.mockReset();
+    vi.useFakeTimers();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('returns a clean timeout error (not an infinite hang) when the fetch never settles', async () => {
+    // fetchHtml never resolves — simulates a hung homes.com SSR fetch
+    // that the transport's own timeout failed to abort.
+    dlFetchHtml.mockImplementation(() => new Promise<string>(() => {}));
+
+    const p = resolveOneAddressDeadlined(
+      dlClient,
+      {
+        address: '155 Quail Cove Blvd Unit 1601',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      },
+      10_000
+    );
+
+    await vi.advanceTimersByTimeAsync(10_001);
+    const result = await p;
+
+    expect(result.resolved).toBe(false);
+    if (!result.resolved) {
+      expect(result.error).toBe('timeout');
+    }
+  });
+
+  it('returns the resolved row when the fetch settles before the deadline', async () => {
+    dlFetchHtml.mockResolvedValueOnce(
+      detailHtmlTop(
+        'https://www.homes.com/property/x/quickhash/',
+        '1 Fast Ln'
+      )
+    );
+    const p = resolveOneAddressDeadlined(
+      dlClient,
+      { address: '1 Fast Ln', city: 'Atlanta', state: 'GA' },
+      10_000
+    );
+    await vi.runAllTimersAsync();
+    const result = await p;
+    expect(result.resolved).toBe(true);
+    if (result.resolved) {
+      expect(result.property_hash).toBe('quickhash');
+    }
+  });
+});
+
+// Detail-page JSON-LD factory shared by the deadline suite (the one
+// inside the `homes_get_by_address tool` describe is scoped to it).
+function detailHtmlTop(url: string, streetAddress: string): string {
+  const doc = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': ['RealEstateListing', 'Product'],
+        '@id': `${url}#realestatelisting`,
+        url,
+        mainEntity: {
+          '@type': 'SingleFamilyResidence',
+          address: { streetAddress },
+        },
+      },
+    ],
+  };
+  return `<html><script type="application/ld+json">${JSON.stringify(doc)}</script></html>`;
+}
