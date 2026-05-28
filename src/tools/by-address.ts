@@ -107,6 +107,30 @@ function asListingItem(listing: DirectListing): JsonLdListingItem {
   };
 }
 
+/**
+ * Run the single-address resolution rung end-to-end: build the
+ * homes.com slug, fetch the page, and parse it. Shared between
+ * `homes_get_by_address` (one call) and `homes_resolve_addresses`
+ * (bulk). Both tools MUST go through this helper so a future change
+ * to the resolution strategy (retry, alternate slug, etc.) lands in
+ * both at once. Transport / non-2xx / sign-in interstitials are
+ * caught and surfaced as the graceful `'no listing found'` outcome
+ * — see #44 for the parity contract.
+ */
+export async function resolveOneAddress(
+  client: { fetchHtml: (path: string) => Promise<string> },
+  input: ByAddressInput
+): Promise<ByAddressResult> {
+  const path = buildAddressSearchPath(input);
+  let html: string;
+  try {
+    html = await client.fetchHtml(path);
+  } catch {
+    return UNRESOLVED;
+  }
+  return resolveListing(html);
+}
+
 export function resolveListing(html: string): ByAddressResult {
   const doc = extractJsonLd(html);
   if (!doc) return UNRESOLVED;
@@ -172,18 +196,6 @@ export function registerByAddressTools(
           .describe('ZIP code (optional; improves precision when present).'),
       },
     },
-    async (input) => {
-      const path = buildAddressSearchPath(input);
-      let html: string;
-      try {
-        html = await client.fetchHtml(path);
-      } catch {
-        // Transport / non-2xx / sign-in interstitial — surface as the
-        // graceful "not resolved" outcome rather than propagating to the
-        // unified caller as a fatal error.
-        return textResult(UNRESOLVED);
-      }
-      return textResult(resolveListing(html));
-    }
+    async (input) => textResult(await resolveOneAddress(client, input))
   );
 }

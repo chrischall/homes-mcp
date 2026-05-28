@@ -3,8 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import {
-  buildAddressSearchPath,
-  resolveListing,
+  resolveOneAddress,
   type ByAddressInput,
 } from './by-address.js';
 
@@ -67,20 +66,14 @@ export function registerResolveAddressesTools(
     },
     async ({ addresses }) => {
       const ts = addresses as ByAddressInput[];
+      // Fan out via the same rung `homes_get_by_address` runs — see
+      // #44. `resolveOneAddress` owns the slug → fetch → parse →
+      // transport-error-degrades-to-"no listing found" contract; we
+      // only reshape the success row (renaming `property_hash` to
+      // `property_id` to line up with `homes_bulk_get`).
       const rows: ResolveRow[] = await Promise.all(
         ts.map(async (input): Promise<ResolveRow> => {
-          const path = buildAddressSearchPath(input);
-          let html: string;
-          try {
-            html = await client.fetchHtml(path);
-          } catch (e) {
-            return {
-              ...input,
-              resolved: false,
-              error: (e as Error).message,
-            };
-          }
-          const result = resolveListing(html);
+          const result = await resolveOneAddress(client, input);
           if (result.resolved) {
             return {
               ...input,

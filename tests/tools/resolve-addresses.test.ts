@@ -98,8 +98,9 @@ describe('homes_resolve_addresses', () => {
     }>(r);
     expect(parsed.results[0].resolved).toBe(true);
     expect(parsed.results[1].resolved).toBe(false);
-    // Transport failure surfaces as "not resolved" — matches the
-    // singular get_by_address graceful-degradation contract.
-    expect(parsed.results[1].error).toBeDefined();
+    // Transport failure surfaces as the canonical "no listing found"
+    // sentinel — matches the singular get_by_address graceful-degradation
+    // contract (#44 parity).
+    expect(parsed.results[1].error).toBe('no listing found');
   });
 });
