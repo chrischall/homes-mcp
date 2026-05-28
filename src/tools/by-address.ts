@@ -8,6 +8,7 @@ import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
+import { SINGLE_RESOLVE_DEADLINE_MS, withDeadline } from './deadline.js';
 import {
   buildSearchPath,
   findListings,
@@ -195,6 +196,34 @@ export async function resolveOneAddress(
   }
 }
 
+/** Canonical sentinel for a single-call that blew the overall deadline. */
+const TIMED_OUT: ByAddressUnresolved = { resolved: false, error: 'timeout' };
+
+/**
+ * `resolveOneAddress` wrapped in a hard overall deadline (#54).
+ *
+ * Both fetch rungs are individually bounded by the transport's ~30s
+ * `fetchTimeoutMs`, but back-to-back that's ~60s — right at the MCP
+ * client's request deadline, which is how a single hung
+ * `homes_get_by_address` ended up wedging the connection with a
+ * `-32001`. Cap the whole resolution below that and return a clean
+ * `{ resolved: false, error: 'timeout' }` instead of hanging. The
+ * underlying fetch is left to settle in the background; we just stop
+ * waiting on it.
+ */
+export async function resolveOneAddressDeadlined(
+  client: { fetchHtml: (path: string) => Promise<string> },
+  input: ByAddressInput,
+  deadlineMs: number = SINGLE_RESOLVE_DEADLINE_MS,
+  opts: ResolveOneAddressOpts = {}
+): Promise<ByAddressResult> {
+  const outcome = await withDeadline(
+    resolveOneAddress(client, input, opts),
+    deadlineMs
+  );
+  return outcome.timedOut ? TIMED_OUT : outcome.value;
+}
+
 /**
  * Pick the location string handed to `buildSearchPath` for the fallback
  * rung. Prefer `"city, state"` (matches every other location-based
@@ -350,6 +379,13 @@ export function registerByAddressTools(
           .describe('ZIP code (optional; improves precision when present).'),
       },
     },
-    async (input) => textResult(await resolveOneAddress(client, input))
+    async (input) =>
+      // #54: cap the whole single-address resolution (slug rung +
+      // search-fallback rung, each bounded by the transport's ~30s
+      // fetchTimeoutMs) below the MCP client's request deadline. A hung
+      // homes.com fetch returns a clean { resolved: false, error:
+      // 'timeout' } instead of wedging the connection until the client
+      // tears it down with a -32001.
+      textResult(await resolveOneAddressDeadlined(client, input))
   );
 }
