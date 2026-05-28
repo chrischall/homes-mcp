@@ -34,7 +34,7 @@ import { registerSessionsTools } from './tools/sessions.js';
 import { registerBulkGetTools } from './tools/bulk-get.js';
 import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
 
-const VERSION = '0.8.0'; // x-release-please-version
+const VERSION = '0.9.0'; // x-release-please-version
 
 const port = process.env.HOMES_WS_PORT
   ? Number(process.env.HOMES_WS_PORT)
