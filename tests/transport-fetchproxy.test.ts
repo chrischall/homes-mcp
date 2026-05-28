@@ -27,6 +27,8 @@ vi.mock('@fetchproxy/server', async () => {
       return {
         role: 'host',
         port: 37149,
+        fetchTimeoutMs: 30_000,
+        bridgeReviveDelayMs: 2_000,
         lastSuccessAt: null,
         lastFailureAt: null,
         lastFailureReason: null,
@@ -61,6 +63,12 @@ function stubInner(role: 'host' | 'peer' | null = 'host'): Inner {
     bridgeHealth: vi.fn().mockReturnValue({
       role,
       port: 37149,
+      // 0.9.0+: server reports the resolved per-request timeout and
+      // lazy-revive delay through bridgeHealth(); the transport adapter
+      // forwards fetchTimeoutMs into BridgeStatus rather than tracking
+      // its own copy of the default.
+      fetchTimeoutMs: 30_000,
+      bridgeReviveDelayMs: 2_000,
       lastSuccessAt: null,
       lastFailureAt: null,
       lastFailureReason: null,
@@ -222,6 +230,11 @@ describe('FetchproxyTransport', () => {
     inner.bridgeHealth.mockReturnValue({
       role: 'host',
       port: 37200,
+      // 0.9.0+: server echoes the resolved per-request timeout back
+      // through bridgeHealth() — that's the value status() forwards
+      // into BridgeStatus.fetchTimeoutMs (no local DEFAULT here).
+      fetchTimeoutMs: 5_000,
+      bridgeReviveDelayMs: 2_000,
       lastSuccessAt: 111,
       lastFailureAt: 222,
       lastFailureReason: 'oops',
@@ -245,6 +258,30 @@ describe('FetchproxyTransport', () => {
     });
   });
 
+  // fetchproxy#82 follow-up: fetchTimeoutMs in BridgeStatus reflects
+  // whatever bridgeHealth() reports — the adapter doesn't keep its own
+  // copy of the default any more, so the value tracks the server's
+  // resolved setting even when the caller didn't pass an override.
+  it('status().fetchTimeoutMs is read from bridgeHealth(), not a local default', () => {
+    // Constructor receives no fetchTimeoutMs override; the server-side
+    // resolved value (here: a stubbed 12_345) is what surfaces.
+    const t = new FetchproxyTransport({ version: '0.0.0' });
+    const inner = stubInner('host');
+    inner.bridgeHealth.mockReturnValue({
+      role: 'host',
+      port: 37149,
+      fetchTimeoutMs: 12_345,
+      bridgeReviveDelayMs: 2_000,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastFailureReason: null,
+      consecutiveFailures: 0,
+      lastExtensionMessageAt: null,
+    });
+    installInner(t, inner);
+    expect(t.status().fetchTimeoutMs).toBe(12_345);
+  });
+
   // fetchproxy#71 / homes-mcp#51: opt into the server's proactive
   // keepalive so the MV3 service worker stays resident across the
   // human-paced gaps between MCP turns. The exact value matches our
@@ -264,6 +301,8 @@ describe('FetchproxyTransport', () => {
     inner.bridgeHealth.mockReturnValue({
       role: null,
       port: 37149,
+      fetchTimeoutMs: 30_000,
+      bridgeReviveDelayMs: 2_000,
       lastSuccessAt: null,
       lastFailureAt: null,
       lastFailureReason: null,
