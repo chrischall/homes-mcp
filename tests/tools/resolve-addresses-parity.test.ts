@@ -93,6 +93,8 @@ interface SingleOk {
 interface SingleFail {
   resolved: false;
   error: string;
+  status?: 'timeout';
+  retryable?: boolean;
 }
 type SingleResult = SingleOk | SingleFail;
 
@@ -309,20 +311,25 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
     expect(br.results[2].resolved).toBe(true);
   });
 
-  it('bulk DIVERGES from single on fetchproxy bridge timeouts — surfaces them distinctly (round-3 #78)', async () => {
+  it('bulk DIVERGES from single on fetchproxy bridge timeouts — surfaces them distinctly (round-3 #78, #64)', async () => {
     // Round-3 #78 carve-out from the broader parity contract above:
     // the generic-error parity ("network down" → "no listing found")
     // still holds, but `FetchproxyTimeoutError` and
-    // `FetchproxyBridgeDownError` are system-level outcomes that
-    // would silently inflate the "not found" count in a 60-row
-    // batch. Surface them via classifyRowError so a summary like
-    // "60/60 with 3 timeouts" stays distinguishable from
-    // "60/60 with 3 missing listings".
+    // `FetchproxyBridgeDownError` are system-level outcomes that must
+    // NOT collapse onto the genuine-miss sentinel — in either path.
+    //
+    // #64 update: the single path no longer degrades a bridge timeout to
+    // "no listing found" (that produced a false "homes.com zero coverage"
+    // conclusion). It now surfaces a retryable `status: 'timeout'`. The
+    // bulk path keeps its own distinct per-row classification ("bridge
+    // timeout after retry: …") so a "60/60 with 3 timeouts" summary stays
+    // distinguishable from "60/60 with 3 missing listings". Both paths
+    // now refuse to mask a transport timeout as a miss — they just shape
+    // the timeout report differently.
 
-    // Single-call behaviour: bridge timeout still degrades to
-    // "no listing found" — the unified canonical-URL caller
-    // expects a single error sentinel.
-    mockFetchHtml.mockRejectedValueOnce(
+    // Single-call behaviour: every rung times out on the cold bridge →
+    // retryable `status: 'timeout'`, never "no listing found".
+    mockFetchHtml.mockRejectedValue(
       new FetchproxyTimeoutError({
         url: 'https://homes.com/',
         timeoutMs: 12000,
@@ -332,7 +339,11 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
       await single.callTool('homes_get_by_address', ADDRS[0])
     );
     expect(sr.resolved).toBe(false);
-    if (!sr.resolved) expect(sr.error).toBe('no listing found');
+    if (!sr.resolved) {
+      expect(sr.status).toBe('timeout');
+      expect(sr.retryable).toBe(true);
+      expect(sr.error).not.toBe('no listing found');
+    }
 
     // Bulk path: row 1's address ("2 Oak Ave") slugs into a path
     // starting `/2-oak-ave-…/`; first attempt + retry both time out
