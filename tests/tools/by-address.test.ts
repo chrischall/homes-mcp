@@ -462,6 +462,28 @@ describe('homes_get_by_address tool', () => {
       expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
     });
 
+    it('BEHAVIOR CONVERGENCE (realty-core): rejects a same-number/different-name street the old matcher would have falsely matched', async () => {
+      // The local matcher kept the 2-char suffix token "st" in the score,
+      // so "100 Main St" vs "100 Oak St" scored 2/3 (number + "st") and
+      // FALSELY matched. The canonical realty-core matcher drops sub-3-char
+      // non-numeric tokens, so the comparison is {100, main} vs {100, oak}
+      // → only "100" overlaps → 0.5, which is NOT a strict majority → no
+      // match. This is the homes #50 false-positive class the canonical
+      // threshold was derived to close.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('oakhash', '100 Oak St')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '100 Main St',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
+    });
+
     it('does not call the search fallback when the slug rung resolves', async () => {
       mockFetchHtml.mockResolvedValueOnce(
         collectionHtml([itemFor('slughash', '126 Sleeping Bear Ln')])

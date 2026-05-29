@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
+import { collectAddressAlternates } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { urlToPath } from '../url.js';
 import {
@@ -454,13 +455,14 @@ export function format(
     out.tax_annual = null;
   }
 
-  // #23: Drop alternates that duplicate the primary streetAddress. Keep
-  // only genuinely-different alternates.
-  if (out.address_alternates && out.address) {
-    const primary = out.address.toLowerCase();
-    const filtered = out.address_alternates.filter(
-      (a) => a.toLowerCase() !== primary
-    );
+  // #23: Dedup the gathered alternates and drop any that match the
+  // primary streetAddress, via the canonical realty-core
+  // `collectAddressAlternates(primary, candidates)` — the same
+  // normalize-then-dedup pair shared across the real-estate MCP family
+  // (input order preserved, original casing returned, primary excluded).
+  // Omit the field entirely when nothing genuinely differs.
+  if (out.address_alternates) {
+    const filtered = collectAddressAlternates(out.address, out.address_alternates);
     if (filtered.length > 0) {
       out.address_alternates = filtered;
     } else {
@@ -674,10 +676,11 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
 
   // #23: Address alternates from MLS data attributes. homes.com pages
   // sometimes carry a `data-unparsed-address` or list multiple
-  // "MLS Address" rows. We scan for either and surface anything that
-  // disagrees with the primary streetAddress (which the caller already
-  // gets in `address`). Omit the field entirely when no alternates.
-  const alts = collectAddressAlternates(root);
+  // "MLS Address" rows. We GATHER the raw candidates here (homes-specific
+  // DOM sources); the canonical realty-core `collectAddressAlternates`
+  // does the dedup + primary-filter in format(), where the primary
+  // streetAddress is known. Stash the raw list for that step.
+  const alts = gatherAddressAlternates(root);
   if (alts.length > 0) out.address_alternates = alts;
 
   // Lot Details — capture the raw square footage from "X acres / Y
@@ -776,20 +779,25 @@ function findDivTextAfterHeading(
 }
 
 /**
- * Collect alternate address strings — MLS feeds, prior addresses,
- * parcel variants. Returns the list dedup'd, in document order. The
- * primary `streetAddress` (already on the formatted record) is NOT
- * filtered here; the caller compares against it in format(). See #23.
+ * GATHER the homes-specific alternate-address candidates from the DOM —
+ * `data-unparsed-address` attributes on hidden MLS-feed nodes, plus <li>
+ * rows under an "Alternate Address" / "MLS Address" heading. Returns the
+ * raw candidate list in document order (whitespace-collapsed only); the
+ * dedup + primary-filter is the canonical realty-core
+ * `collectAddressAlternates(primary, candidates)`'s job, applied in
+ * format() where the primary streetAddress is known. See #23.
+ *
+ * This is the thin gather-then-call wrapper the canonical
+ * address-alternates pair was designed for (realty-core
+ * address-alternates.ts): every portal pulls from different raw fields,
+ * but the dedup semantics are shared.
  */
-function collectAddressAlternates(root: HTMLElement): string[] {
-  const seen = new Set<string>();
+function gatherAddressAlternates(root: HTMLElement): string[] {
   const out: string[] = [];
   const add = (s: string | undefined): void => {
     if (!s) return;
     const v = s.replace(/\s+/g, ' ').trim();
-    if (!v || seen.has(v)) return;
-    seen.add(v);
-    out.push(v);
+    if (v) out.push(v);
   };
   // data-unparsed-address attributes carried on hidden MLS-feed nodes.
   root
