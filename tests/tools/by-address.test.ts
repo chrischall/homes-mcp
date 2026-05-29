@@ -128,6 +128,30 @@ describe('homes_get_by_address tool', () => {
     return `<html><script type="application/ld+json">${JSON.stringify(doc)}</script></html>`;
   };
 
+  // An unambiguous detail-page redirect whose JSON-LD carries NO
+  // streetAddress (homes.com resolved the slug directly, but the detail
+  // doc omits the street). `resolveListing` yields `street_address: ''` —
+  // there is nothing to whole-token-verify against, but homes.com itself
+  // resolved it unambiguously, so the hit must still be accepted.
+  const detailHtmlNoStreet = (url: string) => {
+    const doc = {
+      '@context': 'https://schema.org',
+      '@graph': [
+        { '@type': 'BreadcrumbList' },
+        {
+          '@type': ['RealEstateListing', 'Product'],
+          '@id': `${url}#realestatelisting`,
+          url,
+          mainEntity: {
+            '@type': 'SingleFamilyResidence',
+            address: {},
+          },
+        },
+      ],
+    };
+    return `<html><script type="application/ld+json">${JSON.stringify(doc)}</script></html>`;
+  };
+
   const itemFor = (id: string, street: string) => ({
     '@type': ['RealEstateListing', 'Product'],
     '@id': `https://www.homes.com/property/x/${id}/#realestatelisting`,
@@ -471,6 +495,62 @@ describe('homes_get_by_address tool', () => {
         state: 'NC',
         zip: '28746',
       });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('rightstreet');
+      }
+    });
+
+    it('accepts an unambiguous detail-page slug hit when street_address is empty (nothing to verify against)', async () => {
+      // homes.com routed the slug DIRECTLY to a detail page (an unambiguous
+      // hit) but the JSON-LD carried no streetAddress. The #65 street-match
+      // gate can't succeed on an empty street, but there is nothing to
+      // falsify either — homes.com resolved it. The hit must be accepted on
+      // the slug rung, NOT silently dropped into the search-fallback.
+      mockFetchHtml.mockResolvedValueOnce(
+        detailHtmlNoStreet(
+          'https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/'
+        )
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '3199 Delmar Ln NW',
+        city: 'Atlanta',
+        state: 'GA',
+        zip: '30311',
+      });
+      expect(r.isError).toBeFalsy();
+      // Only the slug rung fired — no fall-through to the search-fallback.
+      expect(mockFetchHtml).toHaveBeenCalledTimes(1);
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({
+        url: 'https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/',
+        property_hash: 'rxrzwg0kjnr32',
+        street_address: '',
+        resolved: true,
+        matched_via: 'slug',
+      });
+    });
+
+    it('#65 (populated): still falls through to search-fallback when the slug street is present but MISMATCHED', async () => {
+      // The street-match gate must remain in force when a street IS present:
+      // a populated-but-wrong slug street must NOT short-circuit the verified
+      // search-fallback (the original #65 intent — don't regress it).
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('wrongstreet', '999 Other Rd')])
+      );
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('rightstreet', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      // Both rungs fired — the populated mismatch did NOT short-circuit.
+      expect(mockFetchHtml).toHaveBeenCalledTimes(2);
       const parsed = parseToolResult<ByAddressResult>(r);
       expect(parsed.resolved).toBe(true);
       if (parsed.resolved) {

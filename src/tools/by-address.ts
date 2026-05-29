@@ -202,7 +202,13 @@ export interface ResolveClient {
  *      rungs cleanly.
  *   1. **Slug rung.** Slugify `{address, city, state, zip}` →
  *      `GET /<slug>/`. Retained as fallback; routes to a collection or
- *      detail page on success.
+ *      detail page on success. The result is taken only when its street
+ *      whole-token-matches the input (#65) — a guessed slug that routes
+ *      to a city collection whose first listing is a DIFFERENT street
+ *      would otherwise mask the verified search-fallback. The gate is
+ *      applied ONLY when a street is present: a direct detail-page hit
+ *      whose JSON-LD omits `streetAddress` is an unambiguous homes.com
+ *      resolution with nothing to verify against, so it is accepted.
  *   2. **Search-fallback rung (#47).** When the rungs above return no
  *      listing (404, empty collection, no JSON-LD), fall through to
  *      the city/zip search page (the same path shape `search.ts`
@@ -212,19 +218,25 @@ export interface ResolveClient {
  *
  * Single- and bulk-address tools MUST go through this helper so a
  * future change to the resolution strategy lands in both at once.
- * Transport / non-2xx / sign-in interstitials at any rung are caught
- * and surfaced as the graceful `'no listing found'` outcome (#45).
  *
- * Bulk callers can opt into `rethrowBridgeErrors: true` to surface
- * `FetchproxyTimeoutError` / `FetchproxyBridgeDownError` distinctly
- * (round-3 zillow #78: bridge timeouts must NEVER be reported as
- * "no listing found" in a 60-row batch summary). The single-call
- * default keeps swallowing every transport error so the unified
- * canonical-URL caller can treat the row as "not on this site"
- * rather than a system failure — the existing parity contract for
- * generic `Error('network down')`-style failures is preserved. The
- * opt-in applies to every rung — a bridge timeout in any rung rethrows
- * before the next rung fires.
+ * Error taxonomy. Non-2xx / sign-in interstitials / generic transport
+ * errors (`Error('network down')`-style) at any rung are caught and
+ * surfaced as the graceful `'no listing found'` outcome (#45) — the
+ * unified canonical-URL caller treats the row as "not on this site"
+ * rather than a system failure. A fetchproxy bridge timeout / bridge-
+ * down error (`FetchproxyTimeoutError` / `FetchproxyBridgeDownError`,
+ * #64) is the EXCEPTION: it is NOT a confirmed coverage gap, so a cold-
+ * bridge timeout in any rung is tracked, and if no rung resolves the
+ * call surfaces a retryable `status: 'timeout'` sentinel instead of
+ * `'no listing found'`. A timeout in one rung never masks a genuine
+ * resolve in a later rung — only an all-miss outcome is downgraded.
+ *
+ * Bulk callers can additionally opt into `rethrowBridgeErrors: true` to
+ * have those same bridge timeouts RETHROWN immediately rather than
+ * tracked (round-3 zillow #78: bridge timeouts must NEVER be reported as
+ * "no listing found" in a 60-row batch summary). The opt-in applies to
+ * every rung — a bridge timeout in any rung rethrows before the next
+ * rung fires.
  */
 export interface ResolveOneAddressOpts {
   rethrowBridgeErrors?: boolean;
@@ -270,7 +282,18 @@ export async function resolveOneAddress(
   try {
     const html = await client.fetchHtml(slugPath);
     const slug = resolveListing(html, 'slug');
-    if (slug.resolved && streetMatchesInput(slug.street_address, input.address)) {
+    // Apply the #65 whole-token street gate ONLY when the slug result
+    // actually carries a street to verify against. A direct detail-page
+    // redirect is an unambiguous homes.com hit; its JSON-LD may omit
+    // `streetAddress` (→ `street_address === ''`), and we can't falsify a
+    // match we have nothing to compare to. Gating those out would drop a
+    // valid hit, so accept the empty-street case and keep the gate for the
+    // populated (collection-page first-item) case #65 targets.
+    if (
+      slug.resolved &&
+      (slug.street_address === '' ||
+        streetMatchesInput(slug.street_address, input.address))
+    ) {
       return slug;
     }
   } catch (err) {
