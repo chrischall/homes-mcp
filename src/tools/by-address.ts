@@ -81,6 +81,17 @@ export interface ByAddressResolved {
 export interface ByAddressUnresolved {
   resolved: false;
   error: string;
+  /**
+   * Transport-timeout taxonomy (#64). Present (and `'timeout'`) only when
+   * the resolution failed because a fetchproxy transport call timed out /
+   * the bridge was down — NOT when homes.com genuinely had no match. A
+   * cold-bridge timeout is indistinguishable from a real miss without
+   * this discriminator, which is exactly what produced the false
+   * "homes.com zero coverage" conclusion. Absent on a genuine miss.
+   */
+  status?: 'timeout';
+  /** True alongside `status: 'timeout'` — the caller should retry. */
+  retryable?: boolean;
 }
 
 export type ByAddressResult = ByAddressResolved | ByAddressUnresolved;
@@ -106,6 +117,34 @@ const UNRESOLVED: ByAddressUnresolved = {
   resolved: false,
   error: 'no listing found',
 };
+
+/**
+ * Transport-timeout outcome for the single path (#64). A cold-bridge
+ * fetchproxy timeout / SW eviction in any rung means we genuinely don't
+ * know whether homes.com has the listing — distinct from a confirmed
+ * miss. Surfaced as a retryable `status: 'timeout'` so a caller (and the
+ * unified canonical-URL fan-out) can tell "retry me" from "not on this
+ * site", instead of recording a false hard miss.
+ */
+const BRIDGE_TIMED_OUT: ByAddressUnresolved = {
+  resolved: false,
+  status: 'timeout',
+  retryable: true,
+  error: 'bridge timeout — homes.com did not respond; retry',
+};
+
+/**
+ * True for the two fetchproxy transport-failure errors that mean
+ * "we never got an answer" (vs. a genuine empty result): a per-request
+ * timeout or a service-worker eviction. Both are retryable and must NOT
+ * collapse onto the `'no listing found'` miss sentinel (#64).
+ */
+function isBridgeTimeout(err: unknown): boolean {
+  return (
+    err instanceof FetchproxyTimeoutError ||
+    err instanceof FetchproxyBridgeDownError
+  );
+}
 
 /**
  * Pull a `RealEstateListing` directly off the JSON-LD graph. homes.com
@@ -196,6 +235,13 @@ export async function resolveOneAddress(
   input: ByAddressInput,
   opts: ResolveOneAddressOpts = {}
 ): Promise<ByAddressResult> {
+  // Track whether ANY rung failed with a fetchproxy transport timeout /
+  // bridge-down error (#64). If every rung fails to resolve and at least
+  // one failed because the bridge never answered, we surface a retryable
+  // `status: 'timeout'` rather than the genuine-miss `'no listing found'`
+  // sentinel — a cold-bridge timeout is not a confirmed coverage gap.
+  let sawBridgeTimeout = false;
+
   // Rung 0: structured smartsearch typeahead (#55) — the primary rung.
   // Routes around the slug rung's URL guessing that 404s real listings.
   if (typeof client.fetchJson === 'function') {
@@ -207,13 +253,8 @@ export async function resolveOneAddress(
       const match = resolveByTypeahead(resp, input);
       if (match.resolved) return match;
     } catch (err) {
-      if (
-        opts.rethrowBridgeErrors &&
-        (err instanceof FetchproxyTimeoutError ||
-          err instanceof FetchproxyBridgeDownError)
-      ) {
-        throw err;
-      }
+      if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
+      if (isBridgeTimeout(err)) sawBridgeTimeout = true;
       // Fall through to the slug rung.
     }
   }
@@ -225,32 +266,27 @@ export async function resolveOneAddress(
     const slug = resolveListing(html, 'slug');
     if (slug.resolved) return slug;
   } catch (err) {
-    if (
-      opts.rethrowBridgeErrors &&
-      (err instanceof FetchproxyTimeoutError ||
-        err instanceof FetchproxyBridgeDownError)
-    ) {
-      throw err;
-    }
+    if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
+    if (isBridgeTimeout(err)) sawBridgeTimeout = true;
     // Fall through to the search rung.
   }
 
   // Rung 2: city / zip search fallback.
   const fallbackLocation = buildFallbackLocation(input);
-  if (!fallbackLocation) return UNRESOLVED;
+  if (!fallbackLocation) return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
   const searchPath = buildSearchPath({ location: fallbackLocation });
   try {
     const html = await client.fetchHtml(searchPath);
-    return resolveBySearchFallback(html, input);
+    const fallback = resolveBySearchFallback(html, input);
+    if (fallback.resolved) return fallback;
+    // Search page came back but had no fuzzy match. If an EARLIER rung
+    // timed out on the bridge, this "empty" search page can't downgrade
+    // a genuine-unknown to a confirmed miss — keep the timeout taxonomy.
+    return sawBridgeTimeout ? BRIDGE_TIMED_OUT : fallback;
   } catch (err) {
-    if (
-      opts.rethrowBridgeErrors &&
-      (err instanceof FetchproxyTimeoutError ||
-        err instanceof FetchproxyBridgeDownError)
-    ) {
-      throw err;
-    }
-    return UNRESOLVED;
+    if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
+    if (isBridgeTimeout(err)) sawBridgeTimeout = true;
+    return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
   }
 }
 
@@ -268,8 +304,18 @@ export async function resolveOneAddress(
  */
 const SINGLE_RESOLVE_DEADLINE_MS = 45_000;
 
-/** Canonical sentinel for a single-call that blew the overall deadline. */
-const TIMED_OUT: ByAddressUnresolved = { resolved: false, error: 'timeout' };
+/**
+ * Canonical sentinel for a single-call that blew the overall deadline.
+ * Carries the same retryable `status: 'timeout'` taxonomy as a per-rung
+ * bridge timeout (#64) so callers branch on one shape regardless of
+ * whether an individual rung timed out or the whole call ran long.
+ */
+const TIMED_OUT: ByAddressUnresolved = {
+  resolved: false,
+  status: 'timeout',
+  retryable: true,
+  error: 'timeout',
+};
 
 /**
  * `resolveOneAddress` wrapped in a hard overall deadline (#54).

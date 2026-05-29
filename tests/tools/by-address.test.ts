@@ -8,6 +8,10 @@ import {
   afterEach,
   afterAll,
 } from 'vitest';
+import {
+  FetchproxyBridgeDownError,
+  FetchproxyTimeoutError,
+} from '@fetchproxy/server';
 import type { HomesClient } from '../../src/client.js';
 import {
   buildAddressSearchPath,
@@ -27,6 +31,8 @@ interface ByAddressResolved {
 interface ByAddressUnresolved {
   resolved: false;
   error: string;
+  status?: 'timeout';
+  retryable?: boolean;
 }
 
 type ByAddressResult = ByAddressResolved | ByAddressUnresolved;
@@ -674,6 +680,139 @@ describe('homes_get_by_address tool', () => {
       const parsed = parseToolResult<ByAddressResult>(r);
       expect(parsed.resolved).toBe(true);
       if (parsed.resolved) expect(parsed.matched_via).toBe('slug');
+    });
+  });
+
+  // ── Transport-timeout taxonomy on the single path (#64) ─────────────
+  //
+  // A cold-bridge fetchproxy timeout (FetchproxyTimeoutError) or a
+  // service-worker eviction (FetchproxyBridgeDownError) in ANY rung means
+  // we genuinely don't know whether homes.com has the listing — it is NOT
+  // a confirmed miss. Surfacing `'no listing found'` here is what produced
+  // the false "homes.com zero coverage" conclusion: identical input warm
+  // resolves true, but cold reported a hard miss. The single path must
+  // surface a distinct, retryable `status: 'timeout'` instead — never
+  // collapse a transport timeout onto the genuine-miss sentinel.
+  describe('transport-timeout taxonomy (#64)', () => {
+    it('surfaces status: timeout (retryable) when the typeahead rung hits a fetchproxy timeout and the SSR rungs also time out — NOT "no listing found"', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      // Slug + search-fallback rungs also time out on the cold bridge.
+      mockFetchHtml.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '219 Picnic Point',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      expect(r.isError).toBeFalsy();
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(false);
+      if (!parsed.resolved) {
+        expect(parsed.status).toBe('timeout');
+        expect(parsed.retryable).toBe(true);
+        expect(parsed.error).not.toBe('no listing found');
+      }
+    });
+
+    it('surfaces status: timeout when the slug rung hits a fetchproxy timeout (typeahead empty, search-fallback also times out)', async () => {
+      // Typeahead empty (default mock). Slug + search-fallback both throw
+      // a bridge timeout — a cold-bridge failure mid-fallthrough.
+      mockFetchHtml.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(false);
+      if (!parsed.resolved) {
+        expect(parsed.status).toBe('timeout');
+        expect(parsed.retryable).toBe(true);
+      }
+    });
+
+    it('surfaces status: timeout on a FetchproxyBridgeDownError (service-worker eviction)', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(
+        new FetchproxyBridgeDownError({
+          originalError: 'service worker evicted',
+          retryAttempted: true,
+        })
+      );
+      mockFetchHtml.mockRejectedValue(
+        new FetchproxyBridgeDownError({
+          originalError: 'service worker evicted',
+          retryAttempted: true,
+        })
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '219 Picnic Point',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(false);
+      if (!parsed.resolved) {
+        expect(parsed.status).toBe('timeout');
+        expect(parsed.retryable).toBe(true);
+      }
+    });
+
+    it('still reports a GENUINE miss as "no listing found" (no status) when every rung returns empty', async () => {
+      // Typeahead empty (default), slug empty, search-fallback empty —
+      // homes.com genuinely has no match. This must stay distinguishable
+      // from a transport timeout.
+      mockFetchHtml.mockResolvedValue(collectionHtml([], 0));
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '999 Nowhere St',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
+    });
+
+    it('a fetchproxy timeout in one rung does not mask a genuine resolve in a later rung', async () => {
+      // Typeahead times out, but the slug rung resolves cleanly. The
+      // timeout must not poison a successful later rung.
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('slugwin', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) expect(parsed.property_hash).toBe('slugwin');
     });
   });
 
