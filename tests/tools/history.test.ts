@@ -110,6 +110,17 @@ describe('normalizeEvents (#26)', () => {
     expect(out[0].type).toBe('Relisted');
   });
 
+  it('maps "Sale Completed" / "Completed" to Sold (realty-core 0.4.0)', () => {
+    // realty-core 0.4.0 adds `completed` → Sold to mapEventType, so
+    // homes.com's "Sale Completed" / "Completed" event strings normalize
+    // to Sold via the wrapper instead of dropping as Unknown.
+    const out = normalizeEvents([
+      { date: '2026-04-10', event: 'Sale Completed' },
+      { date: '2026-04-12', event: 'Completed' },
+    ]);
+    expect(out.map((e) => e.type)).toEqual(['Sold', 'Sold']);
+  });
+
   it('preserves price + carries price_change_pct when present', () => {
     const out = normalizeEvents([
       {

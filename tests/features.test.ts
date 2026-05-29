@@ -180,6 +180,34 @@ describe('extractFeatures', () => {
     it('classifies bare "marina" as marina', () => {
       expect(extractFeatures('Close to the local marina.', []).dock).toBe('marina');
     });
+    it('classifies genuine "marina with boat access" prose as marina', () => {
+      // realty-core 0.4.0 keeps real waterfront-amenity prose mapping to
+      // 'marina' — the place-name guard only suppresses naked place names.
+      expect(
+        extractFeatures('Lakeside lot, marina with boat access.', []).dock
+      ).toBe('marina');
+    });
+    it('classifies "Steps from the marina." prose as marina', () => {
+      expect(extractFeatures('Steps from the marina.', []).dock).toBe('marina');
+    });
+    it('does NOT match "Marina Bay" place name as a dock (0.4.0 guard)', () => {
+      // realty-core 0.4.0 adds a place-name guard: "Marina <Word>" /
+      // "Marina del Rey" / "### Marina Dr" are neighborhood/street names,
+      // not boat-access amenities, so dock stays null.
+      expect(
+        extractFeatures('Welcome to Marina Bay, a lovely home.', []).dock
+      ).toBeNull();
+    });
+    it('does NOT match "Marina del Rey" place name as a dock (0.4.0 guard)', () => {
+      expect(
+        extractFeatures('Located in Marina del Rey.', []).dock
+      ).toBeNull();
+    });
+    it('does NOT match "123 Marina Dr" street name as a dock (0.4.0 guard)', () => {
+      expect(
+        extractFeatures('123 Marina Dr, beautiful home.', []).dock
+      ).toBeNull();
+    });
     it('prefers private over marina when both mentioned', () => {
       expect(
         extractFeatures('Private dock plus easy marina access.', []).dock
