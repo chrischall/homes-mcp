@@ -1,6 +1,6 @@
 # homes-mcp
 
-homes.com real-estate access as an MCP server for Claude — search listings, fetch property details, photo galleries, and run affordability/mortgage math, all via natural language.
+homes.com real-estate access as an MCP server for Claude — search listings, resolve addresses, fetch property details, price/tax history, market reports, saved homes, photo galleries, and run affordability/mortgage math, all via natural language.
 
 > ⚠️ homes.com does not publish a public consumer API. This server reads the same server-rendered HTML and Schema.org JSON-LD that homes.com itself ships to your browser, routed through your own signed-in browser tab via the [fetchproxy](https://github.com/chrischall/fetchproxy) extension. Every request acts on behalf of your existing session — your cookies, your TLS, your JS context — exactly as if you'd clicked it in the browser yourself. Treat this as informal use of homes.com. Use at your own discretion.
 
@@ -8,13 +8,25 @@ homes.com real-estate access as an MCP server for Claude — search listings, fe
 
 | Tool | Purpose |
 | --- | --- |
-| `homes_search_properties` | Search listings by free-text location (city/ZIP/neighborhood). Slugifies the input into homes.com's URL routing and parses the JSON-LD `CollectionPage.mainEntity.itemListElement[]`. Returns address, price, beds/baths, sqft, primary photo, listing agent + brokerage. |
-| `homes_get_property` | Full record for a property by URL. Parses the JSON-LD `RealEstateListing` node. Returns address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, photos URL, and date posted/modified. |
+| `homes_search_properties` | Search listings by free-text location (city/ZIP/neighborhood). Slugifies the input into homes.com's URL routing and parses the JSON-LD `CollectionPage.mainEntity.itemListElement[]`. Filters by `property_type`, `listing_type`, `sort`, and a `price_min`/`price_max` band. Returns address, price, beds/baths, sqft, primary photo, listing agent + brokerage; flags `truncated`/`total_estimated` past the ~40-listing SSR cap. |
+| `homes_get_by_address` | Resolve one US street address to its canonical homes.com property URL + opaque hash. Walks structured typeahead → slug → city/zip search-fallback with whole-token street + unit verification. Returns `matched_via`; degrades to `{ resolved: false }`. |
+| `homes_resolve_addresses` | Bulk `homes_get_by_address` (up to 100 addresses, input order preserved, per-row outcomes). Prefer for batches ≥ 3. |
+| `homes_get_property` | Full record for a property by URL. Parses JSON-LD + DOM-side sections: address, lat/lng, beds/baths, sqft, year built, price, status, agent + brokerage, highlights, schools, HOA (raw + monthly), lot size (sqft + acres), parking, heating/cooling, MLS id/source, tax, days-on-market, price drops, `extracted_features`. Optional inline `price_history`/`tax_history`. |
 | `homes_get_property_photos` | Full photo gallery scraped from `<img>` tags on the detail page (JSON-LD only carries one image). Returns `{ url, position, alt? }` per photo, filtered to the homes.com CDN. |
+| `homes_bulk_get` | Fetch up to 200 properties' structured records in one call (per-row errors, input order preserved). |
 | `homes_compare_properties` | Side-by-side comparison of 2–8 properties with an aligned summary table. Per-target errors captured per-row. Concurrent fetches. |
+| `homes_get_nearby_listings` | The "Homes for Sale Near This Property" cross-link cards from a detail page (For Sale, optionally Rentals). URL + address only. |
+| `homes_get_history` | Combined price + tax history in one fetch: `listing_events`, `ownership_events`, `lien_events`, normalized `events_normalized`, and `tax_records`. |
+| `homes_get_property_history` | *Deprecated* — price/ownership/lien timelines only. Prefer `homes_get_history`. |
+| `homes_get_tax_history` | *Deprecated* — year-by-year tax records only. Prefer `homes_get_history`. |
+| `homes_get_market_report` | Median / average / $-per-sqft for a market, derived from the `sold` search page's JSON-LD. |
+| `homes_get_saved_homes` | The signed-in user's saved (favorited) homes. Auth-gated. |
+| `homes_get_saved_searches` | The signed-in user's saved searches. Auth-gated. |
 | `homes_calculate_affordability` | Local affordability calculator — max purchase price from income + DTI + rates. No network. |
 | `homes_calculate_mortgage` | Local PITI calculator — principal+interest, taxes, insurance, HOA, PMI. No network. |
+| `homes_estimate_rent_vs_buy` | Local rent-vs-buy model — you supply `monthly_rent` (homes.com has no rental signal to impute it; see below). No network. |
 | `homes_healthcheck` | Round-trips `/robots.txt` through the fetchproxy bridge and returns diagnostics + a plain-English hint distinguishing "bridge down" from "extension not connected" from "homes.com-side problem." |
+| `homes_get_session_context` / `homes_register_session` / `homes_set_active_session` | List / register / switch logical homes.com sessions. |
 
 ### Known data gap: rental estimates
 
@@ -77,16 +89,7 @@ npm run build
 
 ### One-time browser setup
 
-homes-mcp talks to your browser through the [fetchproxy](https://github.com/chrischall/fetchproxy) extension, which is shared across every fetchproxy-based MCP (zillow-mcp, opentable-mcp, resy-mcp, …). Install it once:
-
-```bash
-git clone https://github.com/chrischall/fetchproxy
-cd fetchproxy
-npm ci
-npm --workspace=@fetchproxy/extension-chrome run build
-```
-
-Then in Chrome: `chrome://extensions` → toggle Developer mode → Load unpacked → pick `packages/extension-chrome/dist/`.
+homes-mcp talks to your browser through the [fetchproxy](https://github.com/chrischall/fetchproxy) extension, which is shared across every fetchproxy-based MCP (zillow-mcp, opentable-mcp, resy-mcp, …). It lives in its own repo and is installed separately — it is **not** bundled here. Follow the install instructions at [github.com/chrischall/fetchproxy](https://github.com/chrischall/fetchproxy), then load the built extension in Chrome via `chrome://extensions` → toggle Developer mode → Load unpacked.
 
 Open homes.com and sign in. That's all the auth this server needs.
 
