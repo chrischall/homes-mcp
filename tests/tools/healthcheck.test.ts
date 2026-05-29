@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, afterAll } from 'vitest';
 import { classifyBridgeError } from '@fetchproxy/server';
 import type { HomesClient } from '../../src/client.js';
-import { registerHealthcheckTools } from '../../src/tools/healthcheck.js';
+import {
+  registerHealthcheckTools,
+  HEALTHCHECK_PROBE_DEADLINE_MS,
+} from '../../src/tools/healthcheck.js';
 import {
   FetchproxyBridgeDownError,
   FetchproxyProtocolError,
@@ -494,5 +497,67 @@ describe('homes_healthcheck tool', () => {
       bridge: { last_extension_message_at: number | null };
     }>(r);
     expect(parsed.bridge.last_extension_message_at).toBeNull();
+  });
+
+  // ---------- #66: short probe deadline + actionable open/interact hint ----------
+
+  it('caps the probe at a short interactive budget (15–20s), not the transport 30s+', () => {
+    // The probe must fail fast so a user staring at a wedged call gets a
+    // signal in seconds, not after a ~2-minute hang. Pin the budget to
+    // the recommended 15–20s window.
+    expect(HEALTHCHECK_PROBE_DEADLINE_MS).toBeGreaterThanOrEqual(15_000);
+    expect(HEALTHCHECK_PROBE_DEADLINE_MS).toBeLessThanOrEqual(20_000);
+  });
+
+  it('fails fast as a timeout when the probe fetch outlives the probe deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      // fetchHtml that never settles — stands in for a wedged bridge /
+      // sleeping homes.com tab. The tool's own withDeadline wrapper must
+      // fire well before the transport's 30s fetchTimeoutMs would.
+      const neverSettles = vi.fn(() => new Promise<string>(() => {}));
+      const client = stubClient({ fetchHtml: neverSettles });
+      harness = await createTestHarness((server) =>
+        registerHealthcheckTools(server, client)
+      );
+      const call = harness.callTool('homes_healthcheck', {});
+      // Advance past the probe deadline (but well short of 30s+).
+      await vi.advanceTimersByTimeAsync(HEALTHCHECK_PROBE_DEADLINE_MS + 50);
+      const r = await call;
+      const parsed = parseToolResult<{
+        ok: boolean;
+        error_kind: string;
+        error: { kind: string };
+        hint: string;
+      }>(r);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error_kind).toBe('timeout');
+      expect(parsed.error.kind).toBe('timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('timeout hint tells the user to open AND interact with a homes.com portal tab', async () => {
+    const client = stubClient({
+      status: { role: 'host', port: 37149, fetchTimeoutMs: 25 },
+      fetchHtml: vi.fn().mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/robots.txt',
+          timeoutMs: 25,
+          role: 'host',
+          port: 37149,
+        })
+      ),
+    });
+    harness = await createTestHarness((server) =>
+      registerHealthcheckTools(server, client)
+    );
+    const r = await harness.callTool('homes_healthcheck', {});
+    const parsed = parseToolResult<{ hint: string }>(r);
+    // Must name homes.com, AND instruct interaction (scroll/click) — a
+    // loaded, signed-in, interacted tab is what actually unblocks it.
+    expect(parsed.hint).toMatch(/homes\.com/i);
+    expect(parsed.hint).toMatch(/interact|scroll|click/i);
   });
 });

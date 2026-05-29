@@ -1,3 +1,4 @@
+import { withDeadline } from '@fetchproxy/server';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
@@ -116,6 +117,25 @@ interface HealthcheckResult {
 
 const PROBE_PATH = '/robots.txt';
 
+/**
+ * Hard probe deadline for `homes_healthcheck` (#66).
+ *
+ * The transport's per-request `fetchTimeoutMs` defaults to ~30s, and a
+ * one-shot lazy-revive retry on SW eviction can stack that to ~60s —
+ * so without a shorter wrapper a wedged bridge / sleeping homes.com tab
+ * leaves the probe hanging for up to ~2 minutes before it gives up. For
+ * an *interactive* diagnostic that's far too long: a user staring at a
+ * frozen call has no signal about what to do.
+ *
+ * Cap the probe at a short interactive budget so the failure mode is
+ * fast and the actionable hint (open & interact with a homes.com portal
+ * tab) surfaces in seconds rather than minutes. We still ride
+ * fetchproxy's `withDeadline` helper (promoted from homes-mcp in
+ * fetchproxy#86) and the server's `runProbe` loop — this just bounds the
+ * probe fetch from above.
+ */
+export const HEALTHCHECK_PROBE_DEADLINE_MS = 18_000;
+
 function hintFor(args: {
   ok: boolean;
   role: 'host' | 'peer' | null;
@@ -136,7 +156,7 @@ function hintFor(args: {
     return `The bridge never bound a role. listen() may have failed silently on startup. Check stderr from homes-mcp for an error during start, and confirm port ${37149} isn't blocked.`;
   }
   if (args.errorKind === 'timeout') {
-    return `Bridge is alive (role=${args.role}), but the request didn't get a response in time. Either (a) the fetchproxy browser extension isn't connected to this MCP yet — open the extension popup and check for a green dot next to "homes-mcp", or (b) the signed-in homes.com tab is sleeping / closed. Open homes.com in your browser, then retry.`;
+    return `Bridge is alive (role=${args.role}), but the probe didn't get a response within ${Math.round(HEALTHCHECK_PROBE_DEADLINE_MS / 1000)}s. The fix is almost always to wake the homes.com tab: open a homes.com portal tab in your browser, sign in if needed, and INTERACT with it (scroll or click) so the page becomes active — a loaded, signed-in, interacted tab is what unblocks the bridge. Then retry. If that doesn't help, the fetchproxy browser extension may not be connected to this MCP — open the extension popup and check for a green dot next to "homes-mcp".`;
   }
   if (args.errorKind === 'transport') {
     return `The bridge returned a protocol error before any HTTP response. Most commonly: no homes.com tab is open, or the extension declined the request. Open homes.com, sign in, and retry.`;
@@ -178,10 +198,31 @@ export function registerHealthcheckTools(
       let bodyLength: number | undefined;
       let thrown: unknown;
       const probeResult = await client.runProbe(async (path) => {
+        // #66: bound the probe fetch from above with a short interactive
+        // deadline so a wedged bridge / sleeping homes.com tab fails fast
+        // instead of riding the transport's ~30s fetchTimeoutMs (×2 with
+        // lazy-revive ≈ up to ~2 min). `withDeadline` leaves the inner
+        // fetch to settle in the background; we synthesize a
+        // FetchproxyTimeoutError on the timeout arm so runProbe classifies
+        // this exactly like a transport-level timeout (error_kind:
+        // 'timeout') and the actionable open-&-interact hint fires.
         try {
-          const html = await client.fetchHtml(path);
-          bodyLength = html.length;
-          return html;
+          const outcome = await withDeadline(
+            client.fetchHtml(path),
+            HEALTHCHECK_PROBE_DEADLINE_MS
+          );
+          if (outcome.timedOut) {
+            const { role, port } = client.bridgeStatus();
+            throw new FetchproxyTimeoutError({
+              url: `https://www.homes.com${path}`,
+              timeoutMs: HEALTHCHECK_PROBE_DEADLINE_MS,
+              role,
+              port,
+              elapsedMs: HEALTHCHECK_PROBE_DEADLINE_MS,
+            });
+          }
+          bodyLength = outcome.value.length;
+          return outcome.value;
         } catch (e) {
           thrown = e;
           throw e;
