@@ -48,13 +48,39 @@ describe('extractFeatures', () => {
       ).toBe('unfinished');
     });
 
-    it('classifies word-reversed "basement is unfinished"', () => {
+    it('classifies word-reversed "basement is unfinished" (direct connector)', () => {
+      // Canonical detector: the connector (is/was/,/;/:/(/dash) must
+      // directly follow `basement` (modulo whitespace).
+      expect(
+        extractFeatures(
+          'The home includes a basement, unfinished and ready to customize.',
+          []
+        ).basement
+      ).toBe('unfinished');
+    });
+
+    it('does NOT classify when an interposed word breaks the connector (canonical delta)', () => {
+      // DELTA from the prior loose `[^.!?]{0,30}?` window: "basement that
+      // is unfinished" interposes "that" before the connector, so the
+      // tight `BASEMENT_CONNECTOR` class no longer matches. It falls
+      // through to a bare-mention `'unknown'` rather than `'unfinished'`.
       expect(
         extractFeatures(
           'The home includes a basement that is unfinished and ready to customize.',
           []
         ).basement
-      ).toBe('unfinished');
+      ).toBe('unknown');
+    });
+
+    it('does NOT false-positive "basement with finished oak shelving" to finished (canonical delta)', () => {
+      // DELTA from the prior loose window, which matched `finished`
+      // anywhere within ~30 chars of `basement` and so mis-tagged this
+      // as `'finished'`. The canonical connector class rejects the
+      // free-floating preposition "with" — the shelving is finished, not
+      // the basement — yielding a bare-mention `'unknown'`.
+      expect(
+        extractFeatures('Basement with finished oak shelving.', []).basement
+      ).toBe('unknown');
     });
 
     it('classifies "finished basement" as finished', () => {

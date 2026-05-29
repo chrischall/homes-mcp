@@ -1,30 +1,31 @@
 /**
- * Server-side keyword extraction from listing descriptions. Lifts work
- * that callers would otherwise do per-listing in chat — see issue #14
- * for the motivation: real-world session keyword-parsed the same fields
- * out of marketing prose for every listing then discarded the prose.
+ * Community-vocabulary resolution for server-side feature extraction.
  *
- * Pure-function design — `extractFeatures` takes a description string
- * and a community-name vocabulary and returns the structured result.
- * The vocabulary is resolved separately via `loadCommunities` so the
- * env-var override can be tested in isolation.
+ * The extraction itself — `extractFeatures` + the `ExtractedFeatures`
+ * shape — now lives in `@chrischall/realty-core` (realty-mcp#1, round-4
+ * candidate J), reconciling the five cohort copies (zillow / redfin /
+ * compass / homes / onehome) into one canonical, I/O-free helper. We
+ * re-export it here so existing imports (`../features.js`) keep working.
  *
- * Extraction rules are documented inline next to each detector. The
- * one to remember: `unfinished basement` is checked BEFORE
- * `finished basement` because `finished` substring-matches inside
- * `unfinished`. This is the regression-tested subtle-bug pin.
+ * What stays local is `loadCommunities`: it does filesystem I/O (reads a
+ * JSON file named by `HOMES_COMMUNITIES_FILE`), and realty-core is
+ * dependency- and I/O-free by invariant. It produces the
+ * `communities: string[]` vocabulary that callers pass to
+ * `extractFeatures` as its second argument.
+ *
+ * Behavior note (canonical basement detector): realty-core uses
+ * onehome's tighter `BASEMENT_CONNECTOR` conjunct class rather than the
+ * loose `[^.!?]{0,30}?` window homes previously shipped. The connector
+ * must directly follow `basement` (modulo whitespace), so prose like
+ * "basement with finished oak shelving" no longer false-positives to
+ * `basement: 'finished'` — the preposition "with" is rejected and the
+ * result is `'unknown'`. See `tests/features.test.ts` for the pins.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 
-export interface ExtractedFeatures {
-  lake_front: boolean;
-  hot_tub: boolean;
-  basement: 'finished' | 'unfinished' | 'partial' | 'unknown' | null;
-  furnished: 'fully' | 'partial' | 'negotiable' | null;
-  dock: 'private' | 'community' | 'marina' | 'boat_slip' | null;
-  community: string | null;
-}
+export { extractFeatures } from '@chrischall/realty-core';
+export type { ExtractedFeatures } from '@chrischall/realty-core';
 
 /**
  * Default community vocabulary for the Lake Lure / mountain-NC market.
@@ -104,101 +105,4 @@ export function loadCommunities(): string[] {
     cachedFallbackForPath = path;
     return DEFAULT_COMMUNITIES;
   }
-}
-
-// Pre-compiled regex constants. `i` for case-insensitivity throughout.
-const LAKE_FRONT_RE = /\b(?:lakefront|lake front|waterfront)\b/i;
-const HOT_TUB_RE = /\bhot tub\b/i;
-
-// Accepts both word orders within a short window — "unfinished basement"
-// AND "basement is unfinished" / "basement, unfinished". The window
-// (~30 chars / no sentence break) catches typical phrasing without
-// chasing across sentences. Same shape for the other qualifiers.
-const BASEMENT_UNFINISHED_RE =
-  /\b(?:unfinished basement|basement[^.!?]{0,30}?\bunfinished)\b/i;
-const BASEMENT_FINISHED_RE =
-  /\b(?:finished basement|basement[^.!?]{0,30}?\bfinished)\b/i;
-const BASEMENT_PARTIAL_RE =
-  /\b(?:partial(?:ly)? (?:finished )?basement|partial basement|basement[^.!?]{0,30}?\bpartial(?:ly)?)\b/i;
-const BASEMENT_MENTIONED_RE = /\bbasement\b/i;
-
-const FURNISHED_FULLY_RE = /\b(?:fully furnished|sold furnished|turnkey)\b/i;
-// `with exceptions` is intentionally NOT a standalone alternative — real
-// estate descriptions routinely contain "with exceptions" in title /
-// survey / HOA / disclosure contexts unrelated to furnishings. Require
-// the `furnished` token to anchor the match.
-const FURNISHED_PARTIAL_RE = /\b(?:almost furnished|furnished with exceptions)\b/i;
-const FURNISHED_NEGOTIABLE_RE = /\bfurnishings (?:are )?negotiable\b/i;
-
-const DOCK_PRIVATE_RE = /\bprivate (?:boat )?dock\b/i;
-const DOCK_COMMUNITY_RE = /\b(?:community|shared) dock\b/i;
-const DOCK_MARINA_RE = /\bmarina\b/i;
-const DOCK_BOAT_SLIP_RE = /\bboat ?slip\b/i;
-
-/**
- * Extract structured features from a listing description.
- */
-export function extractFeatures(
-  description: string | undefined,
-  communities: string[]
-): ExtractedFeatures {
-  const text = description ?? '';
-  return {
-    lake_front: LAKE_FRONT_RE.test(text),
-    hot_tub: HOT_TUB_RE.test(text),
-    basement: detectBasement(text),
-    furnished: detectFurnished(text),
-    dock: detectDock(text),
-    community: detectCommunity(text, communities),
-  };
-}
-
-function detectBasement(text: string): ExtractedFeatures['basement'] {
-  // ORDER MATTERS. `finished basement` substring-matches inside
-  // `unfinished basement`; check the longer phrase first.
-  if (BASEMENT_UNFINISHED_RE.test(text)) return 'unfinished';
-  if (BASEMENT_PARTIAL_RE.test(text)) return 'partial';
-  if (BASEMENT_FINISHED_RE.test(text)) return 'finished';
-  if (BASEMENT_MENTIONED_RE.test(text)) return 'unknown';
-  return null;
-}
-
-function detectFurnished(text: string): ExtractedFeatures['furnished'] {
-  if (FURNISHED_FULLY_RE.test(text)) return 'fully';
-  if (FURNISHED_NEGOTIABLE_RE.test(text)) return 'negotiable';
-  if (FURNISHED_PARTIAL_RE.test(text)) return 'partial';
-  return null;
-}
-
-function detectDock(text: string): ExtractedFeatures['dock'] {
-  // Specificity order: private > community > boat_slip > marina.
-  // (Marina is the most general and shows up in lots of incidental
-  // contexts; check it last.)
-  if (DOCK_PRIVATE_RE.test(text)) return 'private';
-  if (DOCK_COMMUNITY_RE.test(text)) return 'community';
-  if (DOCK_BOAT_SLIP_RE.test(text)) return 'boat_slip';
-  if (DOCK_MARINA_RE.test(text)) return 'marina';
-  return null;
-}
-
-function detectCommunity(text: string, communities: string[]): string | null {
-  if (communities.length === 0 || text.length === 0) return null;
-  // Find the EARLIEST match in document order — first-by-position, not
-  // first-by-vocabulary-position. A listing that mentions both "Riverbend
-  // at Lake Lure" and "Rumbling Bald" should resolve to whichever is
-  // mentioned first in the prose.
-  let earliest: { name: string; index: number } | null = null;
-  for (const name of communities) {
-    // Word-boundary anchors handle case + trailing punctuation naturally.
-    const re = new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i');
-    const m = re.exec(text);
-    if (m && (earliest === null || m.index < earliest.index)) {
-      earliest = { name, index: m.index };
-    }
-  }
-  return earliest?.name ?? null;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
