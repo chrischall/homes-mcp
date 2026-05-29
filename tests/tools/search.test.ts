@@ -494,6 +494,33 @@ describe('homes_search_properties tool', () => {
     expect(parsed.results).toHaveLength(3);
   });
 
+  it('does NOT mark truncated when a small `limit` slices a fully-rendered page', async () => {
+    // The page SSR'd 10 listings and numberOfItems reports 10 — all
+    // results are present. A small user `limit` slicing the response down
+    // to 3 must NOT flip truncated:true: the cap signals "homes.com has
+    // more than it rendered", not "you asked for fewer than were
+    // rendered". Compare total against the pre-slice page size, not the
+    // limit-sliced length.
+    mockFetchHtml.mockResolvedValueOnce(
+      htmlWith(
+        Array.from({ length: 10 }, (_, i) => itemFor(`p${i}`, 100000 + i * 1000)),
+        10
+      )
+    );
+    const r = await harness.callTool('homes_search_properties', {
+      location: 'Atlanta, GA',
+      limit: 3,
+    });
+    const parsed = parseToolResult<{
+      count: number;
+      truncated: boolean;
+      total_estimated?: number;
+    }>(r);
+    expect(parsed.count).toBe(3);
+    expect(parsed.truncated).toBe(false);
+    expect(parsed.total_estimated).toBeUndefined();
+  });
+
   it('marks truncated: true when numberOfItems exceeds returned items (#25)', async () => {
     // homes.com pages SSR ~40 listings even when numberOfItems reports
     // more. The tool must signal that the caller is looking at a slice.

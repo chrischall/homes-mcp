@@ -2,8 +2,16 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
+import { collectAddressAlternates } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { urlToPath } from '../url.js';
+import {
+  toNumber,
+  firstImage,
+  firstAgent,
+  brokerageFrom,
+  lastPathSegment,
+} from '../jsonld.js';
 import {
   parseHtml,
   parseDollar,
@@ -272,51 +280,17 @@ export interface FormatOptions {
   includeTaxHistory?: boolean;
 }
 
-function toNumber(v: unknown): number | undefined {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/[^0-9.-]/g, '');
-    if (cleaned === '') return undefined;
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  return undefined;
-}
-
-function firstImage(image: string | string[] | undefined): string | undefined {
-  if (!image) return undefined;
-  if (typeof image === 'string') return image;
-  return image[0];
-}
-
-function firstAgent(offeredBy: JsonLdOffer['offeredBy']): JsonLdAgent | undefined {
-  if (!offeredBy) return undefined;
-  if (Array.isArray(offeredBy)) return offeredBy[0];
-  return offeredBy;
-}
-
-function brokerageFrom(agent: JsonLdAgent | undefined): string | undefined {
-  if (!agent?.memberOf) return undefined;
-  if (Array.isArray(agent.memberOf)) return agent.memberOf[0]?.name;
-  return agent.memberOf.name;
-}
-
 /**
  * Derive a homes.com property id from a listing's `url` or `@id`. We
  * take the last non-empty path segment (e.g. `rxrzwg0kjnr32`).
  *
  * Prefer `url` over `@id` because homes.com's @id now includes a
  * `#realestatelisting` fragment (e.g. `.../abc123/#realestatelisting`)
- * — taking the last path segment would otherwise return the fragment
- * instead of the id. The `url` field is fragment-free.
+ * — `lastPathSegment` strips it (and any `?query`) before taking the
+ * final segment. The `url` field is fragment-free.
  */
 export function extractPropertyId(listing: JsonLdListing): string {
-  const source = listing.url ?? listing['@id'] ?? '';
-  const path = source
-    .replace(/^https?:\/\/[^/]+/, '')
-    .replace(/[?#].*$/, '');
-  const segments = path.split('/').filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? '';
+  return lastPathSegment(listing.url ?? listing['@id'] ?? '');
 }
 
 /**
@@ -389,7 +363,11 @@ export function format(
     firstImage(listing.image) ??
     firstImage(main.image);
   const sqft = toNumber(main.floorSize?.value);
-  const extras: Partial<FormattedProperty> = html ? extractDomFields(html) : {};
+  // Parse the detail-page HTML ONCE and thread the single root through
+  // both the DOM-field scrape and the (optional) history block below —
+  // format() used to `parseHtml` the same HTML twice.
+  const root = html ? parseHtml(html) : undefined;
+  const extras: Partial<FormattedProperty> = root ? extractDomFields(root) : {};
 
   // P0 (#14): compute extracted_features whenever the listing has a
   // description, even when we'll omit the raw text from the response.
@@ -454,13 +432,14 @@ export function format(
     out.tax_annual = null;
   }
 
-  // #23: Drop alternates that duplicate the primary streetAddress. Keep
-  // only genuinely-different alternates.
-  if (out.address_alternates && out.address) {
-    const primary = out.address.toLowerCase();
-    const filtered = out.address_alternates.filter(
-      (a) => a.toLowerCase() !== primary
-    );
+  // #23: Dedup the gathered alternates and drop any that match the
+  // primary streetAddress, via the canonical realty-core
+  // `collectAddressAlternates(primary, candidates)` — the same
+  // normalize-then-dedup pair shared across the real-estate MCP family
+  // (input order preserved, original casing returned, primary excluded).
+  // Omit the field entirely when nothing genuinely differs.
+  if (out.address_alternates) {
+    const filtered = collectAddressAlternates(out.address, out.address_alternates);
     if (filtered.length > 0) {
       out.address_alternates = filtered;
     } else {
@@ -481,8 +460,8 @@ export function format(
   // #27: optionally inline history series parsed from the same HTML
   // the format call already has. Saves a second round trip vs calling
   // homes_get_property_history / homes_get_tax_history separately.
-  if ((opts.includePriceHistory || opts.includeTaxHistory) && html) {
-    const root = parseHtml(html);
+  // Reuses the single `root` parsed at the top of format().
+  if ((opts.includePriceHistory || opts.includeTaxHistory) && root) {
     if (opts.includePriceHistory) {
       const listing_events = parsePropertyHistory(root);
       out.price_history = {
@@ -572,8 +551,7 @@ export function registerPropertyTools(
  *   - "Listing and Financial Details" <div> with HOA / MLS / Source text
  *   - "Lot Details" / "Parking" / "Utilities" <div> after their <h3>
  */
-function extractDomFields(html: string): Partial<FormattedProperty> {
-  const root = parseHtml(html);
+function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
   const out: Partial<FormattedProperty> = {};
 
   // Highlights
@@ -632,7 +610,15 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
     }
     const mls = /MLS#?:?\s*([A-Z0-9-]+)/i.exec(finText);
     if (mls) out.mls_id = mls[1];
-    const src = /Source:\s*([A-Z][A-Za-z0-9 ]+)/.exec(finText);
+    // Source name: one or more uppercase-initial words, but STOP before a
+    // word that's immediately followed by a `#`/`:` field label. The old
+    // space-in-class `[A-Za-z0-9 ]+` greedily swallowed the next field's
+    // leading word ("Source: FMLS Listing#: …" captured "FMLS Listing").
+    // The negative lookahead keeps legitimate multi-word sources
+    // ("Stellar MLS") while cutting at the next label.
+    const src = /Source:\s*([A-Z][A-Za-z0-9]*(?:\s+(?![A-Za-z0-9]+\s*[#:])[A-Z][A-Za-z0-9]*)*)/.exec(
+      finText
+    );
     if (src) out.mls_source = src[1].trim();
     // Tax — homes.com surfaces "Annual Tax" / "Property Tax" / "Tax".
     // Capture the dollar amount; sentinel cleanup happens in format().
@@ -666,10 +652,11 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
 
   // #23: Address alternates from MLS data attributes. homes.com pages
   // sometimes carry a `data-unparsed-address` or list multiple
-  // "MLS Address" rows. We scan for either and surface anything that
-  // disagrees with the primary streetAddress (which the caller already
-  // gets in `address`). Omit the field entirely when no alternates.
-  const alts = collectAddressAlternates(root);
+  // "MLS Address" rows. We GATHER the raw candidates here (homes-specific
+  // DOM sources); the canonical realty-core `collectAddressAlternates`
+  // does the dedup + primary-filter in format(), where the primary
+  // streetAddress is known. Stash the raw list for that step.
+  const alts = gatherAddressAlternates(root);
   if (alts.length > 0) out.address_alternates = alts;
 
   // Lot Details — capture the raw square footage from "X acres / Y
@@ -768,20 +755,25 @@ function findDivTextAfterHeading(
 }
 
 /**
- * Collect alternate address strings — MLS feeds, prior addresses,
- * parcel variants. Returns the list dedup'd, in document order. The
- * primary `streetAddress` (already on the formatted record) is NOT
- * filtered here; the caller compares against it in format(). See #23.
+ * GATHER the homes-specific alternate-address candidates from the DOM —
+ * `data-unparsed-address` attributes on hidden MLS-feed nodes, plus <li>
+ * rows under an "Alternate Address" / "MLS Address" heading. Returns the
+ * raw candidate list in document order (whitespace-collapsed only); the
+ * dedup + primary-filter is the canonical realty-core
+ * `collectAddressAlternates(primary, candidates)`'s job, applied in
+ * format() where the primary streetAddress is known. See #23.
+ *
+ * This is the thin gather-then-call wrapper the canonical
+ * address-alternates pair was designed for (realty-core
+ * address-alternates.ts): every portal pulls from different raw fields,
+ * but the dedup semantics are shared.
  */
-function collectAddressAlternates(root: HTMLElement): string[] {
-  const seen = new Set<string>();
+function gatherAddressAlternates(root: HTMLElement): string[] {
   const out: string[] = [];
   const add = (s: string | undefined): void => {
     if (!s) return;
     const v = s.replace(/\s+/g, ' ').trim();
-    if (!v || seen.has(v)) return;
-    seen.add(v);
-    out.push(v);
+    if (v) out.push(v);
   };
   // data-unparsed-address attributes carried on hidden MLS-feed nodes.
   root

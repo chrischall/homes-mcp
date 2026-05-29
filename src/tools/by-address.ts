@@ -5,6 +5,7 @@ import {
   FetchproxyTimeoutError,
   withDeadline,
 } from '@fetchproxy/server';
+import { addressMatch } from '@chrischall/realty-core';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
@@ -315,7 +316,7 @@ export async function resolveOneAddress(
     if (
       slug.resolved &&
       (slug.street_address === '' ||
-        streetMatchesInput(slug.street_address, input.address))
+        addressMatch(input.address, slug.street_address).matched)
     ) {
       return slug;
     }
@@ -475,32 +476,22 @@ function resolveBySearchFallback(
   const { items } = findListings(doc);
   if (items.length === 0) return UNRESOLVED;
 
-  const wanted = streetTokens(input.address);
-  if (wanted.size === 0) return UNRESOLVED;
-
   let best: { item: JsonLdListingItem; score: number } | null = null;
   for (const item of items) {
     const street = item.mainEntity?.address?.streetAddress;
     if (!street) continue;
-    const got = streetTokens(street);
-    if (got.size === 0) continue;
-    // Require the street number (first numeric token, if present)
-    // to match — guards against same-name streets at different
-    // numbers in the same city.
-    const wantNum = firstNumericToken(input.address);
-    const gotNum = firstNumericToken(street);
-    if (wantNum && gotNum && wantNum !== gotNum) continue;
-    let overlap = 0;
-    for (const t of wanted) if (got.has(t)) overlap += 1;
-    const score = overlap / wanted.size;
+    // realty-core `addressMatch` anchors on the street number (every
+    // leading-numeric input token must appear verbatim — guards same-name
+    // streets at different numbers) and scores token overlap with the
+    // strict-majority (> 0.5) threshold. Non-matches return score 0.
+    const { matched, score } = addressMatch(input.address, street);
+    if (!matched) continue;
     if (!best || score > best.score) best = { item, score };
   }
 
-  // Require a strict majority of the input's street tokens to match.
-  // `<= 0.5` rejects exact-half overlap — for 2-token input like
-  // "Main St", a single common token (e.g. "st") would clear a `< 0.5`
-  // bar and pick an unrelated listing.
-  if (!best || best.score <= 0.5) return UNRESOLVED;
+  // `addressMatch` already enforced the strict-majority bar; a non-null
+  // `best` here is a verified match.
+  if (!best) return UNRESOLVED;
   const hash = extractPropertyId(best.item);
   if (!hash) return UNRESOLVED;
   return {
@@ -530,41 +521,36 @@ function resolveByTypeahead(
   const candidates = extractAddressCandidates(resp);
   if (candidates.length === 0) return UNRESOLVED;
 
-  const wanted = streetTokens(input.address);
-  if (wanted.size === 0) return UNRESOLVED;
-  const wantNum = firstNumericToken(input.address);
   const wantUnit = unitToken(input.address);
 
   let best: { candidate: SmartsearchCandidate; score: number } | null = null;
   for (const c of candidates) {
-    // The candidate's street line for token comparison: prefer the
-    // structured `street` (+ explicit `unit`), falling back to the
-    // display name. The display already folds in the unit.
+    // The candidate's street line for comparison: prefer the structured
+    // `street` (+ explicit `unit`), falling back to the display name. The
+    // display already folds in the unit.
     const candidateLine = c.street
       ? `${c.street} ${c.unit ?? ''}`.trim()
       : c.display;
-    const got = streetTokens(candidateLine);
-    if (got.size === 0) continue;
 
-    // Street-number guard — same as the search-fallback rung.
-    const gotNum = firstNumericToken(c.street ?? c.display);
-    if (wantNum && gotNum && wantNum !== gotNum) continue;
-
-    // Unit guard. If the input names a unit, the candidate must carry
-    // the same one (from the structured `unit` field or its display).
+    // Unit guard (layered ON TOP of the matcher). If the input names a
+    // unit, the candidate must carry the same one — multi-unit buildings
+    // return one candidate per unit. The matcher's street-number anchor
+    // catches numeric unit drift, but short/alphanumeric units (e.g.
+    // "4B") tokenize away, so this explicit guard stays. Checked first so
+    // a wrong-unit candidate can't even reach the scorer.
     if (wantUnit) {
       const gotUnit = c.unit ? c.unit.toLowerCase() : unitToken(c.display);
       if (!gotUnit || gotUnit !== wantUnit) continue;
     }
 
-    let overlap = 0;
-    for (const t of wanted) if (got.has(t)) overlap += 1;
-    const score = overlap / wanted.size;
+    // realty-core `addressMatch`: street-number anchor + strict-majority
+    // token-overlap (> 0.5). Same bar as the search-fallback rung.
+    const { matched, score } = addressMatch(input.address, candidateLine);
+    if (!matched) continue;
     if (!best || score > best.score) best = { candidate: c, score };
   }
 
-  // Strict-majority overlap, same bar as the search-fallback rung.
-  if (!best || best.score <= 0.5) return UNRESOLVED;
+  if (!best) return UNRESOLVED;
   const c = best.candidate;
   const street = c.street ?? c.display.split(',')[0] ?? '';
   return {
@@ -576,50 +562,6 @@ function resolveByTypeahead(
     resolved: true,
     matched_via: 'typeahead',
   };
-}
-
-function streetTokens(street: string): Set<string> {
-  return new Set(
-    street
-      .normalize('NFKD')
-      .replace(/[̀-ͯ]/g, '')
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((t) => t.length > 0)
-  );
-}
-
-function firstNumericToken(street: string): string | null {
-  const m = street.match(/\d+/);
-  return m ? m[0] : null;
-}
-
-/**
- * Whole-token street verifier shared across rungs (#65). True when
- * `candidate`'s street whole-token-matches `wantedAddress` with the same
- * bar the search-fallback / typeahead rungs use: the street number (first
- * numeric token, if present on both) must agree, and a strict majority
- * (> 0.5) of the input's street tokens must appear in the candidate.
- *
- * Used to verify the slug rung's result before it short-circuits the
- * verified search-fallback rung. The slug rung takes homes.com's first
- * collection item unverified, so on a cold bridge a guessed slug can
- * route to a city collection whose first listing is a DIFFERENT street —
- * which would mask the correct, verified search-fallback match. Gating
- * the slug rung's early return on this check makes the search-fallback a
- * genuine first-class rung rather than a slug-rung afterthought.
- */
-function streetMatchesInput(candidate: string, wantedAddress: string): boolean {
-  const wanted = streetTokens(wantedAddress);
-  if (wanted.size === 0) return false;
-  const got = streetTokens(candidate);
-  if (got.size === 0) return false;
-  const wantNum = firstNumericToken(wantedAddress);
-  const gotNum = firstNumericToken(candidate);
-  if (wantNum && gotNum && wantNum !== gotNum) return false;
-  let overlap = 0;
-  for (const t of wanted) if (got.has(t)) overlap += 1;
-  return overlap / wanted.size > 0.5;
 }
 
 /**

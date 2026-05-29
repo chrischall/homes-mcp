@@ -32,7 +32,7 @@
   ],
   "scripts": {
     "build": "tsc --noEmit && npm run bundle",
-    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --external:dotenv --banner:js='import { createRequire as __createRequire } from \"module\"; const require = __createRequire(import.meta.url);' --outfile=dist/bundle.js",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --format=esm --banner:js='import { createRequire as __createRequire } from \"module\"; const require = __createRequire(import.meta.url);' --outfile=dist/bundle.js",
     "dev": "node dist/bundle.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -42,7 +42,6 @@
     "@chrischall/realty-core": "^0.4.0",
     "@fetchproxy/server": "^0.10.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "dotenv": "^17.4.2",
     "node-html-parser": "^7.1.0",
     "zod": "^4.4.3"
   },

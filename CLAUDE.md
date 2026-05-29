@@ -4,7 +4,7 @@ Guidance for Claude working in this repo.
 
 ## TL;DR
 
-v0.1.0: homes.com MCP server. Default and only transport: localhost WebSocket via [`@fetchproxy/server`](https://github.com/chrischall/fetchproxy) — the companion browser extension is installed separately rather than embedded. Every HTTP call to homes.com is dispatched through the user's signed-in Chrome tab — each request rides their existing session (cookies, TLS, JS context) exactly as if they'd clicked it themselves.
+homes.com MCP server. Default and only transport: localhost WebSocket via [`@fetchproxy/server`](https://github.com/chrischall/fetchproxy) — the companion browser extension is installed separately rather than embedded. Every HTTP call to homes.com is dispatched through the user's signed-in Chrome tab — each request rides their existing session (cookies, TLS, JS context) exactly as if they'd clicked it themselves.
 
 This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not "Pattern B" (one bootstrap call then direct fetch). homes.com gates traffic through AWS WAF at the session level, so the in-session routing has to be per-call.
 
@@ -26,7 +26,13 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_get_saved_homes` | `tools/saved.ts` | `GET /customer/dashboard/favorites/` — auth-gated DOM scrape | read (auth) |
 | `homes_get_saved_searches` | `tools/saved.ts` | `GET /customer/dashboard/saved-searches/` — auth-gated DOM scrape | read (auth) |
 | `homes_estimate_rent_vs_buy` | `tools/rent-vs-buy.ts` | (local; no network — caller supplies `monthly_rent`; homes.com has no rental signal — see "Rental data gap" below) | read |
-| `homes_get_by_address` | `tools/by-address.ts` | `GET /<address-slug>/` SSR — pick first `CollectionPage.mainEntity.itemListElement[0]` (or single `RealEstateListing` if homes.com redirects to detail). On a slug miss, falls back to `/<city-slug>-<state>/` (or `/<zip>/`) and fuzzy-matches the street. Surfaces `matched_via: "slug" \| "search_fallback"` on hits. Returns `{ resolved: false, error }` on miss. | read |
+| `homes_get_by_address` | `tools/by-address.ts` | Structured smartsearch typeahead (`POST /routes/res/consumer/smartsearch/autocomplete/`) → slug `GET /<address-slug>/` (collection or single `RealEstateListing` detail) → city/zip search fallback. Every candidate verified via realty-core `addressMatch` (whole-token street + numeric anchor) plus a unit guard. Surfaces `matched_via: "typeahead" \| "slug" \| "search_fallback"` on hits; `{ resolved: false, error }` on miss; retryable `status: "timeout"` on a bridge timeout. | read |
+| `homes_resolve_addresses` | `tools/resolve-addresses.ts` | Bulk `homes_get_by_address` — up to 100 `{ address, city, state, zip? }`, same rungs/verification, input order preserved, per-row outcomes (`property_hash`→`property_id`). | read |
+| `homes_bulk_get` | `tools/bulk-get.ts` | Bulk `homes_get_property` — up to 200 URLs, per-row errors captured, input order preserved (structured records only). | read |
+| `homes_get_history` | `tools/history.ts` | Same SSR detail page — combined price + tax history (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`, `tax_records`). Preferred over the two deprecated split tools. | read |
+| `homes_get_session_context` | `tools/sessions.ts` | (local; session registry) — list all registered logical sessions | read |
+| `homes_register_session` | `tools/sessions.ts` | (local; session registry) — register an additional logical session | read |
+| `homes_set_active_session` | `tools/sessions.ts` | (local; session registry) — switch the active logical session | read |
 
 ## Architecture
 
@@ -34,6 +40,8 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 src/
   index.ts              # entry — builds FetchproxyTransport, HomesClient,
                         #   registers tool groups, connects stdio transport
+  index-helpers.ts      # pure entrypoint helpers (resolvePort) — unit-
+                        #   testable without running the boot sequence
   transport.ts          # HomesTransport interface
   transport-fetchproxy.ts # adapter over @fetchproxy/server's FetchproxyServer
   client.ts             # HomesClient.fetchHtml / fetchJson
@@ -44,7 +52,8 @@ src/
   html.ts               # shared HTML scraping helpers built on
                         #   node-html-parser (findTableByHeading,
                         #   tableRows, findLinksUnderHeading,
-                        #   normalizeDate/Dollar/Percent/IntegerLoose).
+                        #   normalizeDate/Dollar/Percent/IntegerLoose/
+                        #   DecimalLoose).
   tools/
     search.ts           # homes_search_properties (buildSearchPath +
                         #   path-based property_type/listing_type/sort)
@@ -64,13 +73,15 @@ src/
     saved.ts            # homes_get_saved_homes + homes_get_saved_searches
                         #   (auth-gated /customer/dashboard/* scrape)
     rent-vs-buy.ts      # homes_estimate_rent_vs_buy (local; no network)
-    by-address.ts       # homes_get_by_address (slugify address parts,
-                        #   fetch /<slug>/, take first listing or single
-                        #   RealEstateListing; on a miss falls back to the
-                        #   city/zip search page + street-token fuzzy
-                        #   match — surfaces matched_via to the caller.
-                        #   Graceful { resolved: false } on miss/error
-                        #   for unified canonical-URL caller)
+    by-address.ts       # homes_get_by_address (typeahead → slug → city/zip
+                        #   search-fallback rungs; realty-core addressMatch
+                        #   verification + unit guard; surfaces matched_via.
+                        #   Graceful { resolved: false } / retryable timeout
+                        #   for the unified canonical-URL caller)
+    resolve-addresses.ts # homes_resolve_addresses (bulk by-address, ≤100)
+    bulk-get.ts         # homes_bulk_get (bulk get_property, ≤200)
+    sessions.ts         # homes_get_session_context / register_session /
+                        #   set_active_session (local session registry)
 
 tests/                  # 1:1 mirror of src/, plus tests/helpers.ts harness.
                         #   All tests mock HomesClient.fetchHtml.

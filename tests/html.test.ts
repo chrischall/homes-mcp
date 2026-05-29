@@ -9,6 +9,7 @@ import {
   parseDollar,
   parsePercent,
   parseIntegerLoose,
+  parseDecimalLoose,
 } from '../src/html.js';
 
 describe('findTableByHeading + tableHeaderCells + tableRows', () => {
@@ -141,5 +142,22 @@ describe('parseDollar / parsePercent / parseIntegerLoose', () => {
   });
   it('parseIntegerLoose strips commas', () => {
     expect(parseIntegerLoose('87,346')).toBe(87346);
+  });
+
+  it('parseDecimalLoose keeps fractional values (e.g. baths "3.5 ba")', () => {
+    expect(parseDecimalLoose('3.5 ba')).toBe(3.5);
+    expect(parseDecimalLoose('2 ba')).toBe(2);
+  });
+
+  it('parseDecimalLoose returns undefined for "--" / "N/A" / "" (no 0 leak)', () => {
+    // The old inline saved.ts parser returned 0 for these because
+    // Number("") is 0 — baths got set to 0 instead of being omitted.
+    expect(parseDecimalLoose('--')).toBeUndefined();
+    expect(parseDecimalLoose('N/A')).toBeUndefined();
+    expect(parseDecimalLoose('')).toBeUndefined();
+  });
+
+  it('parseDecimalLoose returns undefined for multi-dot junk', () => {
+    expect(parseDecimalLoose('2.5.3')).toBeUndefined();
   });
 });

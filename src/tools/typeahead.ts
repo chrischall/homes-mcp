@@ -55,6 +55,7 @@
  */
 
 import type { ByAddressInput } from './by-address.js';
+import { lastPathSegment } from '../jsonld.js';
 
 /** The structured address-suggest endpoint (POST, JSON). */
 export const SMARTSEARCH_AUTOCOMPLETE_PATH =
@@ -166,14 +167,6 @@ export function buildAutocompleteBody(input: ByAddressInput): AutocompleteBody {
   };
 }
 
-/** Last non-empty path segment of a `/property/<slug>/<hash>/` URL. */
-function hashFromUrl(url: string | undefined): string {
-  if (!url) return '';
-  const path = url.replace(/^https?:\/\/[^/]+/, '').replace(/[?#].*$/, '');
-  const segments = path.split('/').filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? '';
-}
-
 /**
  * Normalize a smartsearch response into the candidate list the
  * by-address verifier checks. Keeps only places carrying both a usable
@@ -188,7 +181,8 @@ export function extractAddressCandidates(
   for (const place of places) {
     const url = place.u;
     if (!url) continue;
-    const hash = place.g?.k?.key ?? hashFromUrl(url);
+    // Last non-empty path segment of a `/property/<slug>/<hash>/` URL.
+    const hash = place.g?.k?.key ?? lastPathSegment(url);
     if (!hash) continue;
     out.push({
       url,
