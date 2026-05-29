@@ -10,6 +10,8 @@
  * `memberOf` field is structurally required here.
  */
 
+import { lastPathSegment as fpLastPathSegment } from '@fetchproxy/server';
+
 /** An agent record with the only field the brokerage helper reads. */
 export interface AgentWithMemberOf {
   memberOf?: { name?: string } | { name?: string }[];
@@ -58,21 +60,19 @@ export function brokerageFrom(
 /**
  * Reduce a portal URL or `@id` to its last non-empty path segment — the
  * stable property-id token in homes.com's `/property/<slug>/<hash>/`
- * URLs. Strips the origin (`https://host`), then any `?query`/`#fragment`
+ * URLs. Strips the origin (`scheme://host`), then any `?query`/`#fragment`
  * (homes.com's `@id` now carries a `#realestatelisting` fragment), then
  * splits on `/` and returns the final segment. Returns `''` for empty /
- * segment-less input.
+ * segment-less / `undefined` input.
  *
- * Collapses the 6+ byte-identical strip-`?#`/last-segment copies that
- * lived inline across search.ts / properties.ts / history.ts /
- * typeahead.ts / photos.ts.
+ * The core algorithm now lives in @fetchproxy/server's shared SSR-parsing
+ * surface (`lastPathSegment` was generalized out of this file); we delegate
+ * to it and keep this thin wrapper so the existing call sites across
+ * search.ts / properties.ts / history.ts / typeahead.ts / photos.ts stay
+ * untouched. The wrapper preserves homes's undefined-tolerant contract
+ * (fetchproxy's signature is non-nullable). fetchproxy's scheme-strip regex
+ * is a superset of the old https-only one — identical for homes.com URLs.
  */
 export function lastPathSegment(url: string | undefined): string {
-  if (!url) return '';
-  const segments = url
-    .replace(/^https?:\/\/[^/]+/, '')
-    .replace(/[?#].*$/, '')
-    .split('/')
-    .filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? '';
+  return url ? fpLastPathSegment(url) : '';
 }
