@@ -413,6 +413,73 @@ describe('resolver rung parity: homes_resolve_addresses vs homes_get_by_address'
     expect(br.results[0].error).toMatch(/^bridge unreachable:/);
   });
 
+  it('bulk threads a per-row price band into that row\'s search-fallback path (#46)', async () => {
+    // Slug rung misses → fallback. The price-bounded row must hit the
+    // `?price-min/max`-suffixed city search; the un-banded row must not.
+    const seen: string[] = [];
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      seen.push(path);
+      if (path.startsWith('/atlanta-ga/')) {
+        const item = {
+          '@type': ['RealEstateListing', 'Product'],
+          '@id': 'https://www.homes.com/property/x/bandrow/#realestatelisting',
+          url: 'https://www.homes.com/property/x/bandrow/',
+          mainEntity: { address: { streetAddress: '1 Main St' } },
+        };
+        return `<html><script type="application/ld+json">${JSON.stringify({
+          '@graph': [
+            { '@type': 'CollectionPage', mainEntity: { itemListElement: [item] } },
+          ],
+        })}</script></html>`;
+      }
+      return '<html>nothing here</html>'; // slug rung miss
+    });
+
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', {
+        addresses: [
+          {
+            address: '1 Main St',
+            city: 'Atlanta',
+            state: 'GA',
+            price_min: 300000,
+            price_max: 500000,
+          },
+        ],
+      })
+    );
+    expect(br.results[0].resolved).toBe(true);
+    // The fallback fetch carried the band as a query string.
+    expect(
+      seen.some((p) => p === '/atlanta-ga/?price-min=300000&price-max=500000')
+    ).toBe(true);
+  });
+
+  it('bulk fails only the row with an invalid band; sibling rows resolve (#46)', async () => {
+    mockFetchHtml.mockImplementation(async (path: string) =>
+      path.startsWith('/1-main-st-')
+        ? detailHtml('hash-1-main', '1 Main St')
+        : '<html>nothing</html>'
+    );
+    const br = parseToolResult<BulkResult>(
+      await bulk.callTool('homes_resolve_addresses', {
+        addresses: [
+          { address: '1 Main St', city: 'Atlanta', state: 'GA' },
+          {
+            address: '2 Oak Ave',
+            city: 'Atlanta',
+            state: 'GA',
+            price_min: 600000,
+            price_max: 300000, // inverted → that row errors
+          },
+        ],
+      })
+    );
+    expect(br.results[0].resolved).toBe(true);
+    expect(br.results[1].resolved).toBe(false);
+    expect(br.results[1].error).toMatch(/price_min .* <= price_max/);
+  });
+
   it('bulk caps in-flight fetches at BRIDGE_CONCURRENCY (=6)', async () => {
     let inFlight = 0;
     let peakInFlight = 0;
