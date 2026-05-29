@@ -1,20 +1,22 @@
 /**
- * Tests for shared formatting derivations added in PR 2 (#15, #16, #17,
- * #22, #23). Covers pure helpers individually so the integration paths
- * in tools/properties.test.ts and tools/compare.test.ts can stay
- * focused on tool wiring.
+ * Tests for the homes-mcp adapter layer over the canonical
+ * `@chrischall/realty-core` derivations (#15, #16, #17, #22, #82).
+ *
+ * The underlying math now lives in realty-core (which tests it directly);
+ * what stays here is coverage of the homes-mcp-specific *contract* the
+ * adapters preserve: the "Homes" hyperlink label, the always-present
+ * `{ amount, percent }` price-drop shape with rise/equal handling, the
+ * `hoa_monthly_usd: 0` "No HOA" case, and the boolean `isTaxSentinel`.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
   buildPortalUrlHyperlink,
   computePriceDrop,
-  daysSince,
   hoaToMonthlyUsd,
   isTaxSentinel,
-  lotSizeAcres,
 } from '../src/format.js';
 
-describe('buildPortalUrlHyperlink', () => {
+describe('buildPortalUrlHyperlink (adapter — "Homes" label)', () => {
   it('wraps a URL in Sheets HYPERLINK syntax with "Homes" label', () => {
     const url = 'https://www.homes.com/property/x/abc/';
     expect(buildPortalUrlHyperlink(url)).toBe(`=HYPERLINK("${url}","Homes")`);
@@ -26,21 +28,12 @@ describe('buildPortalUrlHyperlink', () => {
   });
 });
 
-describe('hoaToMonthlyUsd', () => {
+describe('hoaToMonthlyUsd (adapter — "No HOA" zero case)', () => {
   it('returns annual amount divided by 12, rounded', () => {
     expect(hoaToMonthlyUsd(4967, 'Annually')).toBe(414);
   });
   it('returns amount as-is for Monthly', () => {
     expect(hoaToMonthlyUsd(250, 'Monthly')).toBe(250);
-  });
-  it('divides quarterly amounts by 3', () => {
-    expect(hoaToMonthlyUsd(300, 'Quarterly')).toBe(100);
-  });
-  it('divides semi-annual amounts by 6', () => {
-    expect(hoaToMonthlyUsd(600, 'SemiAnnually')).toBe(100);
-  });
-  it('converts weekly via amount * 52 / 12', () => {
-    expect(hoaToMonthlyUsd(50, 'Weekly')).toBe(Math.round((50 * 52) / 12));
   });
   it('returns null and warns on unknown frequency', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -54,25 +47,15 @@ describe('hoaToMonthlyUsd', () => {
   it('returns null when frequency is missing', () => {
     expect(hoaToMonthlyUsd(100, undefined)).toBe(null);
   });
-  it('treats amount 0 as 0 monthly (No HOA case)', () => {
+  it('treats amount 0 with a known frequency as 0 monthly (homes "No HOA" delta)', () => {
+    // homes.com renders "No HOA" as hoa_fee: 0 / frequency: 'month'. The
+    // canonical core returns null for a zero amount (treats it as absent);
+    // the homes adapter surfaces it as a real 0 so callers see "$0/mo".
     expect(hoaToMonthlyUsd(0, 'Monthly')).toBe(0);
   });
 });
 
-describe('daysSince', () => {
-  it('returns days between iso timestamp and now', () => {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    expect(daysSince(thirtyDaysAgo)).toBe(30);
-  });
-  it('returns null for missing input', () => {
-    expect(daysSince(undefined)).toBe(null);
-  });
-  it('returns null for unparseable input', () => {
-    expect(daysSince('not a date')).toBe(null);
-  });
-});
-
-describe('computePriceDrop', () => {
+describe('computePriceDrop (adapter — always-present {amount, percent})', () => {
   it('computes drop amount + percent (rounded to 0.1)', () => {
     expect(computePriceDrop(500000, 480000)).toEqual({ amount: 20000, percent: 4.0 });
   });
@@ -90,7 +73,7 @@ describe('computePriceDrop', () => {
   });
 });
 
-describe('isTaxSentinel', () => {
+describe('isTaxSentinel (adapter — boolean over cleanTaxAnnual)', () => {
   it('treats $0 as a sentinel (not a real assessed value)', () => {
     expect(isTaxSentinel(0)).toBe(true);
   });
@@ -106,39 +89,5 @@ describe('isTaxSentinel', () => {
   });
   it('returns false for undefined (no value to flag)', () => {
     expect(isTaxSentinel(undefined)).toBe(false);
-  });
-});
-
-describe('lotSizeAcres', () => {
-  // Canonical guarded conversion shared across the real-estate MCP
-  // cohort (realty-mcp#7, redfin #81, zillow #93, compass #81,
-  // onehome #49; homes #82). round(sqft / 43560, 2), null-safe.
-  it('45,738 sq ft → 1.05 acres', () => {
-    // 45738 / 43560 = 1.0499… → rounds to 1.05
-    expect(lotSizeAcres(45_738)).toBe(1.05);
-  });
-  it('13,503 sq ft → 0.31 acres', () => {
-    expect(lotSizeAcres(13_503)).toBe(0.31);
-  });
-  it('94,089 sq ft → 2.16 acres', () => {
-    expect(lotSizeAcres(94_089)).toBe(2.16);
-  });
-  it('43,560 sq ft → exactly 1.0 acre', () => {
-    expect(lotSizeAcres(43_560)).toBe(1.0);
-  });
-  it('a tiny lot too small to round to a non-zero 2dp → null (never 0)', () => {
-    // 200 / 43560 = 0.0046… → rounds to 0.00. The invariant is that a
-    // non-null result is always > 0, so this collapses to null, NOT 0.
-    expect(lotSizeAcres(200)).toBeNull();
-  });
-  it('non-positive → null', () => {
-    expect(lotSizeAcres(0)).toBeNull();
-    expect(lotSizeAcres(-1)).toBeNull();
-  });
-  it('missing / non-finite → null', () => {
-    expect(lotSizeAcres(undefined)).toBeNull();
-    expect(lotSizeAcres(null)).toBeNull();
-    expect(lotSizeAcres(NaN)).toBeNull();
-    expect(lotSizeAcres(Infinity)).toBeNull();
   });
 });

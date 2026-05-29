@@ -6,41 +6,12 @@
  * work in terms of paths, not URLs. When a tool accepts a `url` arg
  * from the user, we need to reduce it down to a path before handing
  * it off.
- */
-
-/**
- * Reduce a Homes URL (or path) to its path+search portion.
  *
- * Accepts an absolute URL (any host — we only keep the path), a path
- * starting with `/`, or a bare segment which we coerce to a leading-slash
- * path. Returns the path+search ready to hand to `HomesClient.fetchHtml`.
+ * Both helpers are canonical cohort helpers hoisted into
+ * `@chrischall/realty-core` (realty-mcp#1): `urlToPath` was
+ * byte-identical across zillow/redfin/compass/homes, and
+ * `locationToSlug` byte-identical between compass and homes. We
+ * re-export them here so the existing `../url.js` import sites stay
+ * unchanged.
  */
-export function urlToPath(input: string): string {
-  try {
-    const u = new URL(input);
-    return `${u.pathname}${u.search}`;
-  } catch {
-    return input.startsWith('/') ? input : `/${input}`;
-  }
-}
-
-/**
- * Slugify a free-text location into Homes's search URL format.
- *
- *   "Brooklyn, NY"  → "brooklyn-ny"
- *   "New York, NY"  → "new-york-ny"
- *   "94110"         → "94110"
- *   "Park Slope"    → "park-slope"
- *
- * Homes's `/homes-for-sale/<slug>/` route accepts these as
- * city/neighborhood/ZIP segments. Diacritics are stripped, spaces and
- * commas collapse to `-`, and trailing/leading separators are trimmed.
- */
-export function locationToSlug(input: string): string {
-  return input
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
+export { urlToPath, locationToSlug } from '@chrischall/realty-core';

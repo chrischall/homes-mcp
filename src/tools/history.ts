@@ -12,6 +12,7 @@ import {
   type HTMLElement,
 } from '../html.js';
 import { urlToPath } from '../url.js';
+import { mapEventType, type NormalizedEventType } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 
 /**
@@ -39,18 +40,14 @@ export interface ListingEvent {
 }
 
 /**
- * Standard cross-MCP event type enum (#26). Same shape across onehome,
- * zillow, redfin, compass, homes — so callers can write one normalizer.
+ * Standard cross-MCP event type enum (#26). Now sourced from the
+ * canonical `@chrischall/realty-core` taxonomy (realty-mcp#1), which is
+ * the union of every cohort MCP's enum plus an `'Unknown'` sentinel for
+ * input that doesn't map. `normalizeEvents` drops the `'Unknown'` rows
+ * (with a stderr warning), so the values that actually surface in
+ * homes-mcp output are unchanged from the prior 8-member union.
  */
-export type NormalizedEventType =
-  | 'Listed'
-  | 'PriceChange'
-  | 'Pending'
-  | 'Contingent'
-  | 'Sold'
-  | 'Withdrawn'
-  | 'Relisted'
-  | 'Delisted';
+export type { NormalizedEventType };
 
 export interface NormalizedEvent {
   date: string;
@@ -70,8 +67,12 @@ export interface NormalizedEvent {
 export function normalizeEvents(events: ListingEvent[]): NormalizedEvent[] {
   const out: NormalizedEvent[] = [];
   for (const e of events) {
+    // Canonical cohort mapper (realty-mcp#1). Returns `'Unknown'` rather
+    // than `null` for input it can't classify — homes-mcp drops those
+    // rows (with a stderr warning) exactly as the old inline mapper did,
+    // so the normalized output never carries `'Unknown'`.
     const type = mapEventType(e.event);
-    if (type === null) {
+    if (type === 'Unknown') {
       console.error(
         `[homes-mcp] events_normalized: unrecognized event "${e.event}" — dropped from normalized list`
       );
@@ -85,24 +86,6 @@ export function normalizeEvents(events: ListingEvent[]): NormalizedEvent[] {
     out.push(rec);
   }
   return out;
-}
-
-function mapEventType(eventText: string): NormalizedEventType | null {
-  const t = eventText.toLowerCase().trim();
-  // Order: most-specific → most-general so "price reduced" beats
-  // "reduced" by itself.
-  if (/price\s*(chang(e|ed)|reduc(ed|tion)?|drop(ped)?)|\breduced\b/.test(t)) {
-    return 'PriceChange';
-  }
-  if (/\b(listed|new\s+listing|active|for\s+sale)\b/.test(t)) return 'Listed';
-  if (/\bre[\s-]?listed\b/.test(t)) return 'Relisted';
-  if (/\bpending\b/.test(t)) return 'Pending';
-  if (/\bcontingent\b/.test(t)) return 'Contingent';
-  if (/\bsold\b/.test(t)) return 'Sold';
-  if (/\b(withdrawn|cancell?ed|expired)\b/.test(t)) return 'Withdrawn';
-  // "Off Market" / "Delisted" — homes.com uses both.
-  if (/\b(off\s+market|delisted)\b/.test(t)) return 'Delisted';
-  return null;
 }
 
 export interface OwnershipEvent {

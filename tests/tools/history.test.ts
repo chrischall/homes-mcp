@@ -136,6 +136,19 @@ describe('normalizeEvents (#26)', () => {
     spy.mockRestore();
   });
 
+  it('does NOT false-match "Inactive" / "Foreclosed" via word-boundary anchors (realty-core delta)', () => {
+    // The canonical mapper anchors `\bactive\b` and `\bclosed\b` so
+    // "Inactive" doesn't bucket as Listed and "Foreclosed" doesn't
+    // bucket as Sold — both fall through to the dropped `'Unknown'` row.
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const out = normalizeEvents([
+      { date: '2026-05-01', event: 'Inactive' },
+      { date: '2026-05-02', event: 'Foreclosed' },
+    ]);
+    expect(out).toEqual([]);
+    spy.mockRestore();
+  });
+
   it('handles empty input', () => {
     expect(normalizeEvents([])).toEqual([]);
   });
