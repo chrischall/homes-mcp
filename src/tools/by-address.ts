@@ -13,6 +13,7 @@ import {
   buildSearchPath,
   findListings,
   extractPropertyId,
+  validatePriceBand,
   type JsonLdListingItem,
 } from './search.js';
 import {
@@ -60,6 +61,21 @@ export interface ByAddressInput {
   city: string;
   state: string;
   zip?: string;
+  /**
+   * Optional price band (USD) used ONLY by the search-fallback rung
+   * (#46). When set, the city/zip search page the fallback loads is
+   * bounded by homes.com's `?price-min=` / `?price-max=` filter — this
+   * narrows an ambiguous-address area search so the street-token matcher
+   * has fewer, more-relevant candidates to pick from (improves recall on
+   * rural / locality-mismatched addresses, and keeps the result set under
+   * the ~40-listing SSR cap). When omitted, behaviour is unchanged: the
+   * fallback loads the full unbounded area search. The typeahead and slug
+   * rungs ignore the band — they resolve a single known address, so a
+   * price filter has nothing to narrow there. Validate via
+   * `validatePriceBand` before calling.
+   */
+  price_min?: number;
+  price_max?: number;
 }
 
 export interface ByAddressResolved {
@@ -247,6 +263,13 @@ export async function resolveOneAddress(
   input: ByAddressInput,
   opts: ResolveOneAddressOpts = {}
 ): Promise<ByAddressResult> {
+  // Validate the optional price band (#46) up front — BEFORE any rung's
+  // try/catch — so an invalid band throws a clear "bad input" error
+  // rather than being swallowed by a rung catch and masquerading as a
+  // graceful `'no listing found'` miss. A bad band is a caller mistake,
+  // not a coverage gap.
+  validatePriceBand(input);
+
   // Track whether ANY rung failed with a fetchproxy transport timeout /
   // bridge-down error (#64). If every rung fails to resolve and at least
   // one failed because the bridge never answered, we surface a retryable
@@ -302,10 +325,17 @@ export async function resolveOneAddress(
     // Fall through to the search rung.
   }
 
-  // Rung 2: city / zip search fallback.
+  // Rung 2: city / zip search fallback. Thread the optional price band
+  // (#46) into the area search so an ambiguous address resolves against a
+  // price-bounded result set — narrows the candidate pool the street-token
+  // matcher picks from. Omitted band ⇒ unbounded area search (unchanged).
   const fallbackLocation = buildFallbackLocation(input);
   if (!fallbackLocation) return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
-  const searchPath = buildSearchPath({ location: fallbackLocation });
+  const searchPath = buildSearchPath({
+    location: fallbackLocation,
+    price_min: input.price_min,
+    price_max: input.price_max,
+  });
   try {
     const html = await client.fetchHtml(searchPath);
     const fallback = resolveBySearchFallback(html, input);
@@ -612,7 +642,7 @@ export function registerByAddressTools(
     {
       title: 'Resolve a street address to a homes.com property URL',
       description:
-        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
+        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Optional `price_min` / `price_max` (USD) bound ONLY the city/zip search-fallback rung — when an address is ambiguous or the typeahead misses and you know the listing's rough price, this narrows the area search (homes.com `?price-min=`/`?price-max=` filter) so the fuzzy matcher picks from fewer, more-relevant candidates; omit for unchanged unbounded behaviour. Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
       annotations: {
         title: 'Resolve a street address to a homes.com property URL',
         readOnlyHint: true,
@@ -631,6 +661,20 @@ export function registerByAddressTools(
           .string()
           .optional()
           .describe('ZIP code (optional; improves precision when present).'),
+        price_min: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe(
+            "Optional lower price bound (USD). Applied ONLY to the city/zip search-fallback rung — bounds that area search with homes.com's `?price-min=` filter so an ambiguous address resolves against a narrower candidate set. Ignored by the typeahead/slug rungs (a single known address has nothing to narrow). Omit for unbounded fallback. Must be <= price_max when both are given."
+          ),
+        price_max: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe(
+            "Optional upper price bound (USD). Applied ONLY to the search-fallback rung (homes.com's `?price-max=` filter). Useful when an address is ambiguous or the typeahead misses and you know the listing's rough price — improves disambiguation/recall. Omit for unbounded fallback."
+          ),
       },
     },
     async (input) =>

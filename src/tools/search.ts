@@ -207,6 +207,58 @@ export interface SearchInput {
   property_type?: PropertyType;
   listing_type?: ListingType;
   sort?: SortOption;
+  /**
+   * Lower price bound (USD), inclusive. Emitted as the `?price-min=`
+   * query string — see `buildSearchPath`. Omit for no lower bound.
+   */
+  price_min?: number;
+  /**
+   * Upper price bound (USD), inclusive. Emitted as the `?price-max=`
+   * query string — see `buildSearchPath`. Omit for no upper bound.
+   */
+  price_max?: number;
+}
+
+/**
+ * Validate a `{ price_min, price_max }` band before it goes into a URL.
+ * Throws a clear `Error` on any invalid bound so a caller surfaces a
+ * "bad input" message rather than silently dropping the filter or
+ * building a nonsense URL:
+ *
+ *   - each bound, if present, must be a finite non-negative number;
+ *   - `price_min` must not exceed `price_max` when both are present.
+ *
+ * A band where both bounds are omitted is valid (no-op). Shared by
+ * `homes_search_properties` and the `homes_get_by_address`
+ * search-fallback rung so the same band is rejected identically
+ * everywhere.
+ */
+export function validatePriceBand(band: {
+  price_min?: number;
+  price_max?: number;
+}): void {
+  const { price_min, price_max } = band;
+  for (const [name, v] of [
+    ['price_min', price_min],
+    ['price_max', price_max],
+  ] as const) {
+    if (v === undefined) continue;
+    if (typeof v !== 'number' || !Number.isFinite(v)) {
+      throw new Error(`${name} must be a finite number (got ${String(v)}).`);
+    }
+    if (v < 0) {
+      throw new Error(`${name} must be non-negative (got ${v}).`);
+    }
+  }
+  if (
+    price_min !== undefined &&
+    price_max !== undefined &&
+    price_min > price_max
+  ) {
+    throw new Error(
+      `price_min (${price_min}) must be <= price_max (${price_max}).`
+    );
+  }
 }
 
 const TYPE_TO_SLUG_SALE: Record<PropertyType, string> = {
@@ -247,14 +299,30 @@ const TYPE_TO_SLUG_RENT: Record<PropertyType, string> = {
  *   /<city>/<segment>/newest/         sort=newest (appended)
  *
  * Verified by inspecting homes.com nav links on /brooklyn-ny/ (2026-05-26).
- * Path-based filters work; query-string filters are stripped at the edge.
+ * Path-based filters work; query-string filters are stripped at the edge —
+ * with ONE verified exception: the price band. homes.com honours
+ * `?price-min=<n>` / `?price-max=<n>` query strings (its own `under-<max>`
+ * path facet 302-redirects to exactly that query string), and they bound
+ * the rendered CollectionPage. Verified live 2026-05-29 against
+ * `/atlanta-ga/houses-for-sale/?price-min=300000&price-max=500000` and the
+ * bare `/lake-lure-nc/?price-min=…&price-max=…` slug. The price band is
+ * emitted as a trailing query string; every other facet stays path-based.
+ *
+ * `price_min` / `price_max` are validated via `validatePriceBand` before
+ * the URL is built — `buildSearchPath` assumes a pre-validated band and
+ * just floors each bound to an integer dollar amount for the query string.
  */
 export function buildSearchPath(input: SearchInput): string {
   const slug = locationToSlug(input.location);
 
+  // The price band rides as a query string on whatever path we build
+  // below (it composes with the path facets — verified live). Build it
+  // once here so every early-return path picks it up.
+  const query = buildPriceQuery(input.price_min, input.price_max);
+
   // new_construction has its own URL root; other params are ignored.
   if (input.listing_type === 'new_construction') {
-    return `/new-homes/for-sale/${slug}/`;
+    return `/new-homes/for-sale/${slug}/${query}`;
   }
 
   let segment = '';
@@ -279,7 +347,23 @@ export function buildSearchPath(input: SearchInput): string {
   const parts: string[] = [slug];
   if (segment) parts.push(segment);
   if (sort) parts.push(sort);
-  return `/${parts.join('/')}/`;
+  return `/${parts.join('/')}/${query}`;
+}
+
+/**
+ * Build the `?price-min=&price-max=` query-string suffix for a search
+ * path, or `''` when neither bound is set. Each bound is floored to an
+ * integer dollar amount (homes.com's price facet is integer-valued).
+ * Assumes the band was already run through `validatePriceBand`.
+ */
+function buildPriceQuery(
+  priceMin: number | undefined,
+  priceMax: number | undefined
+): string {
+  const params: string[] = [];
+  if (priceMin !== undefined) params.push(`price-min=${Math.floor(priceMin)}`);
+  if (priceMax !== undefined) params.push(`price-max=${Math.floor(priceMax)}`);
+  return params.length > 0 ? `?${params.join('&')}` : '';
 }
 
 interface CollectionPageMainEntity {
@@ -361,9 +445,24 @@ export function registerSearchTools(
           .enum(['newest'])
           .optional()
           .describe('Sort order. Only "newest" is currently supported.'),
+        price_min: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe(
+            'Lower price bound in USD (inclusive). Emitted as homes.com\'s `?price-min=` filter. Composes with property_type / listing_type. Must be <= price_max when both are given.'
+          ),
+        price_max: z
+          .number()
+          .nonnegative()
+          .optional()
+          .describe(
+            'Upper price bound in USD (inclusive). Emitted as homes.com\'s `?price-max=` filter. Pair with price_min to band a busy market under the ~40-listing SSR cap.'
+          ),
       },
     },
     async (input) => {
+      validatePriceBand(input);
       const path = buildSearchPath(input);
       const html = await client.fetchHtml(path);
       const doc = extractJsonLd(html);

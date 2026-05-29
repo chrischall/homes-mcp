@@ -590,6 +590,174 @@ describe('homes_get_by_address tool', () => {
     });
   });
 
+  // ── Price band on the search-fallback rung (#46) ────────────────────
+  //
+  // Optional `price_min` / `price_max` bound ONLY the search-fallback
+  // rung's area search (homes.com `?price-min=`/`?price-max=` query
+  // string — verified live 2026-05-29). A price-bounded fallback narrows
+  // the candidate set the fuzzy matcher picks from, improving recall when
+  // an address is ambiguous or the typeahead misses. Omitted ⇒ unchanged
+  // (unbounded fallback). Invalid band ⇒ clear error (caller mistake, not
+  // a coverage miss). The typeahead/slug rungs ignore the band — they
+  // resolve a single known address with nothing to narrow.
+  describe('price band on the search-fallback rung (#46)', () => {
+    it('bounds the fallback area search with ?price-min=&price-max= when a band is given', async () => {
+      // Slug rung empty → fall through to the price-bounded search page.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('bandhash', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+        price_min: 300000,
+        price_max: 600000,
+      });
+      expect(r.isError).toBeFalsy();
+      // Slug rung: the bare address slug (band does NOT apply here).
+      expect(mockFetchHtml.mock.calls[0][0]).toBe(
+        '/126-sleeping-bear-ln-lake-lure-nc-28746/'
+      );
+      // Search-fallback rung: city slug bounded by the price band.
+      expect(mockFetchHtml.mock.calls[1][0]).toBe(
+        '/lake-lure-nc/?price-min=300000&price-max=600000'
+      );
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('bandhash');
+      }
+    });
+
+    it('threads a lower-only / upper-only bound', async () => {
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('lo', '99 Elm St')])
+      );
+      await harness.callTool('homes_get_by_address', {
+        address: '99 Elm St',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+        price_min: 250000,
+      });
+      expect(mockFetchHtml.mock.calls[1][0]).toBe(
+        '/lake-lure-nc/?price-min=250000'
+      );
+    });
+
+    it('leaves the fallback path UNCHANGED (no query string) when no band is given', async () => {
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('nob', '126 Sleeping Bear Ln')])
+      );
+      await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      // Unbounded fallback — byte-identical to pre-#46 behaviour.
+      expect(mockFetchHtml.mock.calls[1][0]).toBe('/lake-lure-nc/');
+    });
+
+    it('does NOT apply the band to the typeahead rung (typeahead still resolves directly)', async () => {
+      // A band is given, but the typeahead rung resolves first — no SSR
+      // fetch happens at all, so the band never touches a URL.
+      mockFetchJson.mockResolvedValueOnce(
+        smartsearch([
+          {
+            n: '126 Sleeping Bear Ln, Lake Lure, NC',
+            u: '/property/126-sleeping-bear-ln-lake-lure-nc/typehash1/',
+            key: 'typehash1',
+          },
+        ])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+        price_min: 300000,
+        price_max: 600000,
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) expect(parsed.matched_via).toBe('typeahead');
+      // Typeahead short-circuited everything — no SSR fetch, band unused.
+      expect(mockFetchHtml).not.toHaveBeenCalled();
+    });
+
+    it('does NOT apply the band to the slug rung (slug path carries no query string)', async () => {
+      // Band given, but the slug rung resolves. The slug path is the bare
+      // address slug — the band must NOT leak onto it.
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('slughash', '126 Sleeping Bear Ln')])
+      );
+      await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+        price_min: 300000,
+        price_max: 600000,
+      });
+      // Only the slug rung fired, on the bare slug (no query string).
+      expect(mockFetchHtml).toHaveBeenCalledTimes(1);
+      expect(mockFetchHtml.mock.calls[0][0]).toBe(
+        '/126-sleeping-bear-ln-lake-lure-nc-28746/'
+      );
+    });
+
+    it('narrows the fallback so a price-band-bounded result resolves where the unbounded set is ambiguous', async () => {
+      // The crux of #46: with the band, homes.com returns ONLY the
+      // in-band listing on the matching street, so the fuzzy matcher
+      // resolves cleanly. (The mock stands in for homes.com having
+      // applied the `?price-min/max` filter server-side.)
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('inband', '158 Raven Blvd')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '158 Raven Blvd',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+        price_min: 400000,
+        price_max: 700000,
+      });
+      expect(mockFetchHtml.mock.calls[1][0]).toBe(
+        '/lake-lure-nc/?price-min=400000&price-max=700000'
+      );
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('inband');
+      }
+    });
+
+    it('returns a clear error on an inverted band (min > max) — not a "no listing found" miss', async () => {
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+        price_min: 600000,
+        price_max: 300000,
+      });
+      expect(r.isError).toBeTruthy();
+      const text = (r.content[0] as { text: string }).text;
+      expect(text).toMatch(/price_min .* <= price_max/);
+      // Rejected before any rung fetch — distinct from a graceful miss.
+      expect(mockFetchHtml).not.toHaveBeenCalled();
+      expect(mockFetchJson).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Structured smartsearch typeahead rung (#55) ─────────────────────
   //
   // The PRIMARY rung. The legacy slug rung guessed

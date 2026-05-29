@@ -6,6 +6,7 @@ import {
   findListings,
   formatHome,
   registerSearchTools,
+  validatePriceBand,
 } from '../../src/tools/search.js';
 import { extractJsonLd } from '../../src/page-state.js';
 import { createTestHarness, parseToolResult } from '../helpers.js';
@@ -143,6 +144,114 @@ describe('buildSearchPath — extended filters', () => {
         sort: 'newest',
       })
     ).toBe('/new-homes/for-sale/brooklyn-ny/');
+  });
+});
+
+// ── Price band (#46) ───────────────────────────────────────────────────
+//
+// homes.com honours the price filter as a QUERY STRING (`?price-min=` /
+// `?price-max=`), unlike every other (path-based) facet. Verified live
+// 2026-05-29: `/atlanta-ga/houses-for-sale/?price-min=300000&price-max=
+// 500000` bounded the rendered CollectionPage to [309000, 499000]; the
+// bare `/lake-lure-nc/?price-min=…&price-max=…` slug bounded identically.
+// (homes.com's own `under-<max>` path facet 302-redirects to exactly the
+// `?price-max=` query string.)
+describe('buildSearchPath — price band (#46)', () => {
+  it('appends ?price-min= for a lower bound on a bare location', () => {
+    expect(
+      buildSearchPath({ location: 'Lake Lure, NC', price_min: 300000 })
+    ).toBe('/lake-lure-nc/?price-min=300000');
+  });
+
+  it('appends ?price-max= for an upper bound', () => {
+    expect(
+      buildSearchPath({ location: 'Lake Lure, NC', price_max: 600000 })
+    ).toBe('/lake-lure-nc/?price-max=600000');
+  });
+
+  it('appends both bounds as &-joined query params', () => {
+    expect(
+      buildSearchPath({
+        location: 'Atlanta, GA',
+        price_min: 300000,
+        price_max: 500000,
+      })
+    ).toBe('/atlanta-ga/?price-min=300000&price-max=500000');
+  });
+
+  it('composes the band with a path facet (query string trails the path)', () => {
+    expect(
+      buildSearchPath({
+        location: 'Atlanta, GA',
+        property_type: 'single_family',
+        price_min: 300000,
+        price_max: 500000,
+      })
+    ).toBe('/atlanta-ga/houses-for-sale/?price-min=300000&price-max=500000');
+  });
+
+  it('composes the band with a ZIP location', () => {
+    expect(
+      buildSearchPath({ location: '28746', price_min: 250000 })
+    ).toBe('/28746/?price-min=250000');
+  });
+
+  it('floors a fractional bound to an integer dollar amount', () => {
+    expect(
+      buildSearchPath({ location: 'Atlanta, GA', price_max: 499999.99 })
+    ).toBe('/atlanta-ga/?price-max=499999');
+  });
+
+  it('omits the query string entirely when no band is given (unchanged)', () => {
+    expect(buildSearchPath({ location: 'Atlanta, GA' })).toBe('/atlanta-ga/');
+  });
+
+  it('also bounds the new-construction URL space', () => {
+    expect(
+      buildSearchPath({
+        location: 'Atlanta, GA',
+        listing_type: 'new_construction',
+        price_max: 400000,
+      })
+    ).toBe('/new-homes/for-sale/atlanta-ga/?price-max=400000');
+  });
+});
+
+describe('validatePriceBand (#46)', () => {
+  it('accepts an empty band (no-op)', () => {
+    expect(() => validatePriceBand({})).not.toThrow();
+  });
+
+  it('accepts a lower-only, upper-only, and full band', () => {
+    expect(() => validatePriceBand({ price_min: 0 })).not.toThrow();
+    expect(() => validatePriceBand({ price_max: 100 })).not.toThrow();
+    expect(() =>
+      validatePriceBand({ price_min: 100, price_max: 200 })
+    ).not.toThrow();
+  });
+
+  it('accepts an equal band (min === max)', () => {
+    expect(() =>
+      validatePriceBand({ price_min: 500000, price_max: 500000 })
+    ).not.toThrow();
+  });
+
+  it('rejects a negative bound with a clear message', () => {
+    expect(() => validatePriceBand({ price_min: -1 })).toThrow(/non-negative/);
+    expect(() => validatePriceBand({ price_max: -5 })).toThrow(/non-negative/);
+  });
+
+  it('rejects a non-finite bound', () => {
+    expect(() => validatePriceBand({ price_max: Infinity })).toThrow(
+      /finite/
+    );
+    expect(() => validatePriceBand({ price_min: NaN })).toThrow(/finite/);
+  });
+
+  it('rejects an inverted band (min > max) with a clear message', () => {
+    expect(() =>
+      validatePriceBand({ price_min: 500000, price_max: 300000 })
+    ).toThrow(/price_min .* <= price_max/);
   });
 });
 
@@ -432,5 +541,31 @@ describe('homes_search_properties tool', () => {
     expect(r.isError).toBeTruthy();
     const text = (r.content[0] as { text: string }).text;
     expect(text).toMatch(/could not locate JSON-LD/);
+  });
+
+  it('threads price_min/price_max into the fetched search path (#46)', async () => {
+    mockFetchHtml.mockResolvedValueOnce(htmlWith([itemFor('aaa', 400000)]));
+    const r = await harness.callTool('homes_search_properties', {
+      location: 'Atlanta, GA',
+      price_min: 300000,
+      price_max: 500000,
+    });
+    expect(r.isError).toBeFalsy();
+    expect(mockFetchHtml.mock.calls[0][0]).toBe(
+      '/atlanta-ga/?price-min=300000&price-max=500000'
+    );
+  });
+
+  it('returns a clear error (no fetch) on an inverted price band (#46)', async () => {
+    const r = await harness.callTool('homes_search_properties', {
+      location: 'Atlanta, GA',
+      price_min: 500000,
+      price_max: 300000,
+    });
+    expect(r.isError).toBeTruthy();
+    const text = (r.content[0] as { text: string }).text;
+    expect(text).toMatch(/price_min .* <= price_max/);
+    // The band was rejected before any network call.
+    expect(mockFetchHtml).not.toHaveBeenCalled();
   });
 });

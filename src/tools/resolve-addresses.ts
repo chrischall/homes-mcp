@@ -104,13 +104,15 @@ export function registerResolveAddressesTools(
                 city: z.string(),
                 state: z.string(),
                 zip: z.string().optional(),
+                price_min: z.number().nonnegative().optional(),
+                price_max: z.number().nonnegative().optional(),
               })
               .passthrough()
           )
           .min(1)
           .max(MAX_ADDRESSES)
           .describe(
-            `Array of address records to resolve (1–${MAX_ADDRESSES} per call). Each must include street \`address\`, \`city\`, and 2-letter \`state\`; \`zip\` is optional but improves precision.`
+            `Array of address records to resolve (1–${MAX_ADDRESSES} per call). Each must include street \`address\`, \`city\`, and 2-letter \`state\`; \`zip\` is optional but improves precision. Optional per-row \`price_min\` / \`price_max\` (USD) bound that row's city/zip search-fallback rung — same semantics as \`homes_get_by_address\` (must be non-negative, min <= max; an invalid band fails only that row).`
           ),
       },
     },
