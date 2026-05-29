@@ -452,6 +452,33 @@ describe('homes_get_by_address tool', () => {
       expect(mockFetchHtml).toHaveBeenCalledTimes(1);
     });
 
+    it('#65: falls through to the verified search-fallback when the slug rung lands on a WRONG-street listing', async () => {
+      // Cold-bridge reality: homes.com routes the guessed slug to a city
+      // collection page whose FIRST listing is a different street. The slug
+      // rung takes the first item unverified, which would mask the right
+      // match. The search-fallback rung does whole-token verification, so a
+      // slug result that doesn't match the input street must NOT short-
+      // circuit it — search-fallback is a first-class verified rung.
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('wrongstreet', '999 Other Rd')])
+      );
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('rightstreet', '158 Raven Blvd')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '158 Raven Blvd',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('rightstreet');
+      }
+    });
+
     it('skips the fallback fetch when only city is given (no state, no zip) — locality too broad', async () => {
       // Slug rung — empty / no JSON-LD.
       mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
@@ -813,6 +840,111 @@ describe('homes_get_by_address tool', () => {
       const parsed = parseToolResult<ByAddressResult>(r);
       expect(parsed.resolved).toBe(true);
       if (parsed.resolved) expect(parsed.property_hash).toBe('slugwin');
+    });
+  });
+
+  // ── Search-fallback as a first-class rung on typeahead timeout (#65) ──
+  //
+  // The typeahead rung is the timeout-prone one (it's the first hop on a
+  // cold bridge). A typeahead TIMEOUT must NOT prevent resolution when the
+  // search corpus has the address — the search-fallback rung (whole-token
+  // street match) is a first-class alternative, not just a last resort
+  // after the slug rung. These pin: a typeahead timeout still lands on the
+  // search-fallback and resolves; the earlier timeout does not poison a
+  // successful search-fallback into a `status: 'timeout'`.
+  describe('search-fallback rung on typeahead timeout (#65)', () => {
+    it('resolves via the search-fallback rung when the typeahead rung times out (slug empty)', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      // Slug rung: no JSON-LD. Search-fallback: the listing is present.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('searchwin', '158 Raven Blvd')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '158 Raven Blvd',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      expect(r.isError).toBeFalsy();
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('searchwin');
+      }
+    });
+
+    it('resolves via the search-fallback rung when BOTH the typeahead and slug rungs time out (search page reachable)', async () => {
+      // The crux of #65 + #64: the typeahead and slug rungs time out on a
+      // half-cold bridge, but the search page is reachable and carries the
+      // listing. The earlier timeouts must NOT short-circuit to a
+      // `status: 'timeout'` — the search-fallback resolves cleanly.
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      // Slug rung throws a timeout; search-fallback resolves.
+      mockFetchHtml.mockRejectedValueOnce(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('lateresolve', '219 Picnic Point')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '219 Picnic Point',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('lateresolve');
+      }
+    });
+
+    it('whole-token street match on the fallback keeps the street-number guard (no wrong-number pick) after a typeahead timeout', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockRejectedValue(
+        new FetchproxyTimeoutError({
+          url: 'https://www.homes.com/',
+          timeoutMs: 30000,
+        })
+      );
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      // Same street name, different numbers — the guard must pick 126.
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([
+          itemFor('wrongnum', '127 Sleeping Bear Ln'),
+          itemFor('rightnum', '126 Sleeping Bear Ln'),
+        ])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.matched_via).toBe('search_fallback');
+        expect(parsed.property_hash).toBe('rightnum');
+      }
     });
   });
 

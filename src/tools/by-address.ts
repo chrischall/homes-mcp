@@ -259,12 +259,20 @@ export async function resolveOneAddress(
     }
   }
 
-  // Rung 1: slug.
+  // Rung 1: slug. Take homes.com's routing result only when its street
+  // whole-token-matches the input (#65). The slug rung trusts the first
+  // collection item, so a guessed slug that routes to a city collection
+  // page whose first listing is a DIFFERENT street would otherwise mask
+  // the verified search-fallback. On a street mismatch we fall through to
+  // the (verified) search-fallback rung instead of returning the wrong
+  // listing.
   const slugPath = buildAddressSearchPath(input);
   try {
     const html = await client.fetchHtml(slugPath);
     const slug = resolveListing(html, 'slug');
-    if (slug.resolved) return slug;
+    if (slug.resolved && streetMatchesInput(slug.street_address, input.address)) {
+      return slug;
+    }
   } catch (err) {
     if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
     if (isBridgeTimeout(err)) sawBridgeTimeout = true;
@@ -531,6 +539,34 @@ function streetTokens(street: string): Set<string> {
 function firstNumericToken(street: string): string | null {
   const m = street.match(/\d+/);
   return m ? m[0] : null;
+}
+
+/**
+ * Whole-token street verifier shared across rungs (#65). True when
+ * `candidate`'s street whole-token-matches `wantedAddress` with the same
+ * bar the search-fallback / typeahead rungs use: the street number (first
+ * numeric token, if present on both) must agree, and a strict majority
+ * (> 0.5) of the input's street tokens must appear in the candidate.
+ *
+ * Used to verify the slug rung's result before it short-circuits the
+ * verified search-fallback rung. The slug rung takes homes.com's first
+ * collection item unverified, so on a cold bridge a guessed slug can
+ * route to a city collection whose first listing is a DIFFERENT street —
+ * which would mask the correct, verified search-fallback match. Gating
+ * the slug rung's early return on this check makes the search-fallback a
+ * genuine first-class rung rather than a slug-rung afterthought.
+ */
+function streetMatchesInput(candidate: string, wantedAddress: string): boolean {
+  const wanted = streetTokens(wantedAddress);
+  if (wanted.size === 0) return false;
+  const got = streetTokens(candidate);
+  if (got.size === 0) return false;
+  const wantNum = firstNumericToken(wantedAddress);
+  const gotNum = firstNumericToken(candidate);
+  if (wantNum && gotNum && wantNum !== gotNum) return false;
+  let overlap = 0;
+  for (const t of wanted) if (got.has(t)) overlap += 1;
+  return overlap / wanted.size > 0.5;
 }
 
 /**
