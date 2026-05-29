@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { extractImgTags } from '@fetchproxy/server';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { lastPathSegment } from '../jsonld.js';
 import { fetchListingRecord } from './properties.js';
+
+// Re-exported from @fetchproxy/server so tests/tools/photos.test.ts (and any
+// other caller importing from this module) keep their import path unchanged.
+export { extractImgTags };
 
 /**
  * Photo galleries on homes.com are NOT exposed via JSON-LD beyond a
@@ -31,32 +36,6 @@ export interface FormattedPhoto {
   url: string;
   position: number;
   alt?: string;
-}
-
-/**
- * Parse `<img>` tags out of an HTML body. We do this with a regex
- * rather than a full HTML parser because (a) we only want `src` (and
- * `alt` for filtering hints), (b) the dependency surface stays empty,
- * and (c) the HTML we're parsing is server-rendered React output —
- * predictable enough that a single attribute-order-agnostic regex is
- * fine.
- */
-export function extractImgTags(html: string): Array<{ src: string; alt?: string }> {
-  const out: Array<{ src: string; alt?: string }> = [];
-  // <img ... src="..." ... alt="..." ...> — attributes can appear in
-  // any order, so we capture src and alt independently with two passes
-  // over each tag.
-  const tagRe = /<img\b[^>]*>/gi;
-  const srcRe = /\bsrc\s*=\s*["']([^"']+)["']/i;
-  const altRe = /\balt\s*=\s*["']([^"']*)["']/i;
-  for (const m of html.matchAll(tagRe)) {
-    const tag = m[0];
-    const src = srcRe.exec(tag)?.[1];
-    if (!src) continue;
-    const alt = altRe.exec(tag)?.[1];
-    out.push(alt !== undefined ? { src, alt } : { src });
-  }
-  return out;
 }
 
 /**
