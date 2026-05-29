@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0](https://github.com/chrischall/homes-mcp/compare/v0.10.0...v0.11.0) (2026-05-29)
+
+
+### Features
+
+* adopt @chrischall/realty-core 0.4.0 (marina place-name guard + completed→Sold) ([#63](https://github.com/chrischall/homes-mcp/issues/63)) ([15937ac](https://github.com/chrischall/homes-mcp/commit/15937acef7c11c86b8d4728449fe50a10245ae2b))
+* adopt realty-core extractFeatures (canonical basement detector) + drop inline copy ([#62](https://github.com/chrischall/homes-mcp/issues/62)) ([3dd95bd](https://github.com/chrischall/homes-mcp/commit/3dd95bd07d221e63fb9bd46ee1276f33256d4950))
+* consume @chrischall/realty-core 0.3.1 — drop inline hoisted helpers ([#61](https://github.com/chrischall/homes-mcp/issues/61)) ([9e5b75d](https://github.com/chrischall/homes-mcp/commit/9e5b75dc78aafad958244cdb5b8e1cbeac7f090d))
+* **properties:** add derived lot_size_acres ([#82](https://github.com/chrischall/homes-mcp/issues/82)) ([#59](https://github.com/chrischall/homes-mcp/issues/59)) ([6b225ec](https://github.com/chrischall/homes-mcp/commit/6b225ecc4a7c2405eb9756d6d581834fb0217faf))
+
+
+### Bug Fixes
+
+* **by-address:** resolve via structured smartsearch typeahead to fix coverage false-negatives ([#58](https://github.com/chrischall/homes-mcp/issues/58)) ([14f0a84](https://github.com/chrischall/homes-mcp/commit/14f0a841ba40801b13f9cb0bd3de533ae77eca70))
+* **resolve-addresses:** add overall deadline + paced fan-out + single-call timeout ([#54](https://github.com/chrischall/homes-mcp/issues/54)) ([#56](https://github.com/chrischall/homes-mcp/issues/56)) ([c90508d](https://github.com/chrischall/homes-mcp/commit/c90508de972dffbdfd1a7b45af1981dcdaaa3b13))
+* **resolve-addresses:** unref pacing timer + true staggered refill dispatch ([#57](https://github.com/chrischall/homes-mcp/issues/57)) ([b43e013](https://github.com/chrischall/homes-mcp/commit/b43e01392eb7ada96b7020b4454692ea721dd883))
+
+
+### Refactor
+
+* **transport:** read fetchTimeoutMs from bridgeHealth() instead of local DEFAULT — closes drift gap per fetchproxy[#82](https://github.com/chrischall/homes-mcp/issues/82) ([#52](https://github.com/chrischall/homes-mcp/issues/52)) ([53abda5](https://github.com/chrischall/homes-mcp/commit/53abda5f5b7fd0b8c09a7e5e797f1089adac123b))
+
 ## [0.10.0](https://github.com/chrischall/homes-mcp/compare/v0.9.0...v0.10.0) (2026-05-28)
 
 
