@@ -632,7 +632,15 @@ function extractDomFields(html: string): Partial<FormattedProperty> {
     }
     const mls = /MLS#?:?\s*([A-Z0-9-]+)/i.exec(finText);
     if (mls) out.mls_id = mls[1];
-    const src = /Source:\s*([A-Z][A-Za-z0-9 ]+)/.exec(finText);
+    // Source name: one or more uppercase-initial words, but STOP before a
+    // word that's immediately followed by a `#`/`:` field label. The old
+    // space-in-class `[A-Za-z0-9 ]+` greedily swallowed the next field's
+    // leading word ("Source: FMLS Listing#: …" captured "FMLS Listing").
+    // The negative lookahead keeps legitimate multi-word sources
+    // ("Stellar MLS") while cutting at the next label.
+    const src = /Source:\s*([A-Z][A-Za-z0-9]*(?:\s+(?![A-Za-z0-9]+\s*[#:])[A-Z][A-Za-z0-9]*)*)/.exec(
+      finText
+    );
     if (src) out.mls_source = src[1].trim();
     // Tax — homes.com surfaces "Annual Tax" / "Property Tax" / "Tax".
     // Capture the dollar amount; sentinel cleanup happens in format().

@@ -474,15 +474,21 @@ export function registerSearchTools(
       }
       const { total, items } = findListings(doc);
       const limit = input.limit ?? 40;
-      const formatted = items
+      const rendered = items
         .map(formatHome)
-        .filter((h): h is FormattedHome => h !== null)
-        .slice(0, limit);
+        .filter((h): h is FormattedHome => h !== null);
+      const formatted = rendered.slice(0, limit);
       // #25: homes.com SSRs ~40 listings per page even when its
       // numberOfItems counter reports more. Signal the slice explicitly
       // so callers can tell "all results" from "page 1 of many".
+      //
+      // Compare `total` against the PRE-slice rendered count, not the
+      // user-`limit`-sliced length: a small `limit` slicing a fully
+      // rendered page is the caller asking for fewer rows, NOT homes.com
+      // withholding listings. Using the sliced length here falsely
+      // reported truncated:true whenever `limit` < page size.
       const truncated =
-        typeof total === 'number' && total > formatted.length;
+        typeof total === 'number' && total > rendered.length;
       const payload: {
         search_path: string;
         total_items: number | undefined;

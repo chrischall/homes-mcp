@@ -35,6 +35,18 @@ describe('parseSavedHomes', () => {
   it('returns [] for the empty state', () => {
     expect(parseSavedHomes(parseHtml(HOMES_EMPTY))).toEqual([]);
   });
+
+  it('omits baths (does not set 0) when the card shows a "--" sentinel', () => {
+    // The old inline Number() parser turned "--" into 0; route through
+    // the shared safe parser so an absent value stays absent.
+    const html = `<article>
+      <a href="/property/x/sentinel1/"></a>
+      <span class="baths">-- ba</span>
+    </article>`;
+    const items = parseSavedHomes(parseHtml(html));
+    expect(items).toHaveLength(1);
+    expect(items[0].baths).toBeUndefined();
+  });
 });
 
 describe('parseSavedSearches', () => {

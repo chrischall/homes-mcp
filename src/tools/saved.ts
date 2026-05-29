@@ -6,6 +6,7 @@ import {
   parseHtml,
   parseDollar,
   parseIntegerLoose,
+  parseDecimalLoose,
   type HTMLElement,
 } from '../html.js';
 
@@ -76,8 +77,13 @@ export function parseSavedHomes(root: HTMLElement): SavedHome[] {
       if (n !== undefined) item.beds = n;
     }
     if (bathsEl) {
-      const n = Number(bathsEl.text.replace(/[^0-9.]/g, ''));
-      if (Number.isFinite(n)) item.baths = n;
+      // Route baths through the shared safe parser like the other card
+      // fields (price/beds/sqft). The old inline `Number(...)` returned 0
+      // for "--"/"N/A"/"" — baths got set to 0 instead of being omitted.
+      // `parseDecimalLoose` keeps the fractional "3.5 ba" case and omits
+      // the empty sentinels. (#)
+      const n = parseDecimalLoose(bathsEl.text);
+      if (n !== undefined) item.baths = n;
     }
     if (sqftEl) {
       const n = parseIntegerLoose(sqftEl.text);

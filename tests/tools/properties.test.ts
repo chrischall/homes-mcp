@@ -620,6 +620,34 @@ describe('homes_get_property — sentinel + alternates pinned via JSON-LD shim',
     expect(p.price_drop_percent).toBeCloseTo(9.1, 1);
   });
 
+  it('does not over-capture mls_source when another labelled field follows on the same line', async () => {
+    // homes.com flattens the financial section onto one line, so a
+    // "Source: FMLS" followed by "Listing#: 7654321" sits in the same
+    // string. The space-in-class regex used to greedily swallow the next
+    // field's leading word ("FMLS Listing"). Stop at the next label.
+    fetch2.mockResolvedValueOnce(
+      htmlWithFinSection('MLS#: 7654321 Source: FMLS Listing#: 7654321 Status: Active')
+    );
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.mls_source).toBe('FMLS');
+  });
+
+  it('keeps a multi-word mls_source intact when no labelled field follows', async () => {
+    // "Stellar MLS" is a legitimate two-word source; capture both words
+    // when nothing labelled (Word#: / Word:) comes after.
+    fetch2.mockResolvedValueOnce(htmlWithFinSection('Source: Stellar MLS'));
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+    expect(p.mls_source).toBe('Stellar MLS');
+  });
+
   it('surfaces address_alternates from data-unparsed-address when they differ (#23)', async () => {
     fetch2.mockResolvedValueOnce(
       htmlWithFinSection('', ['169 Overlook Point Ln', '109 Overlook Point Ln'])

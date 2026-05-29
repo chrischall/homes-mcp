@@ -167,3 +167,20 @@ export function parseIntegerLoose(raw: string): number | undefined {
   const n = Number(cleaned);
   return Number.isFinite(n) && Number.isInteger(n) ? n : undefined;
 }
+
+/**
+ * Like `parseIntegerLoose` but keeps a fractional component — for fields
+ * that are legitimately non-integer, e.g. bath counts ("3.5 ba"). Strips
+ * everything but digits, a sign, and the decimal point, then guards the
+ * EMPTY sentinels and a finite result. Returns `undefined` (never `0`)
+ * for "--"/"N/A"/""/multi-dot junk so the absent case stays absent
+ * rather than masquerading as a real `0`.
+ */
+export function parseDecimalLoose(raw: string): number | undefined {
+  const v = raw.trim();
+  if (EMPTY.has(v)) return undefined;
+  const cleaned = v.replace(/[^0-9.-]/g, '');
+  if (cleaned === '' || cleaned === '-' || cleaned === '.') return undefined;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : undefined;
+}

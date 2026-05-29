@@ -20,6 +20,7 @@ import { SessionRegistry } from '../src/sessions.js';
 import { registerSessionsTools } from '../src/tools/sessions.js';
 import { registerBulkGetTools } from '../src/tools/bulk-get.js';
 import { registerResolveAddressesTools } from '../src/tools/resolve-addresses.js';
+import { resolvePort } from '../src/index-helpers.js';
 import { createTestHarness } from './helpers.js';
 
 const mockClient = {
@@ -54,6 +55,31 @@ const EXPECTED_TOOLS = [
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
 afterAll(async () => {
   if (harness) await harness.close();
+});
+
+describe('resolvePort', () => {
+  it('returns undefined when HOMES_WS_PORT is unset (transport picks the default)', () => {
+    expect(resolvePort(undefined)).toBeUndefined();
+  });
+
+  it('returns the parsed integer for a valid numeric string', () => {
+    expect(resolvePort('40000')).toBe(40000);
+  });
+
+  it('returns undefined for a NaN value rather than passing NaN through', () => {
+    // `Number("foo")` is NaN — which is falsy-but-not-undefined and would
+    // otherwise reach the transport as a bogus port. Guard with
+    // Number.isFinite and fall back to the default (undefined).
+    expect(resolvePort('foo')).toBeUndefined();
+  });
+
+  it('returns undefined for an empty string', () => {
+    expect(resolvePort('')).toBeUndefined();
+  });
+
+  it('returns undefined for a non-finite numeric expression', () => {
+    expect(resolvePort('Infinity')).toBeUndefined();
+  });
 });
 
 describe('tool registration', () => {
