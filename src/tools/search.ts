@@ -4,6 +4,13 @@ import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
+import {
+  toNumber,
+  firstImage,
+  firstAgent,
+  brokerageFrom,
+  lastPathSegment,
+} from '../jsonld.js';
 
 /**
  * homes.com search-results are server-rendered at
@@ -96,26 +103,6 @@ export interface FormattedHome {
   status?: string;
 }
 
-/** Coerce a number-or-string into a finite number, or undefined. */
-function toNumber(v: unknown): number | undefined {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string') {
-    // Strip any non-numeric punctuation (commas, $, etc.) before parsing.
-    const cleaned = v.replace(/[^0-9.-]/g, '');
-    if (cleaned === '') return undefined;
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  return undefined;
-}
-
-/** Pull the first image URL out of a string-or-string-array field. */
-function firstImage(image: string | string[] | undefined): string | undefined {
-  if (!image) return undefined;
-  if (typeof image === 'string') return image;
-  return image[0];
-}
-
 /**
  * Derive a homes.com "property id" from a listing's `@id` or `url`.
  *
@@ -124,32 +111,13 @@ function firstImage(image: string | string[] | undefined): string | undefined {
  * where <propertyId> is a short base36-ish token (e.g. `rxrzwg0kjnr32`).
  * We treat the last non-empty path segment as the id — this round-trips
  * the search results into a stable identifier callers can use.
+ *
+ * Prefer `url` over `@id` because homes.com's @id now includes a
+ * `#realestatelisting` fragment — `lastPathSegment` strips it (along with
+ * any `?query`) before taking the final segment.
  */
 export function extractPropertyId(item: JsonLdListingItem): string {
-  // Prefer `url` over `@id` because homes.com's @id now includes a
-  // `#realestatelisting` fragment — if @id is "…/abc123/#realestatelisting"
-  // and we take the last path segment, we get the fragment, not the id.
-  // The `url` field is the canonical, fragment-free property URL.
-  const source = item.url ?? item['@id'] ?? '';
-  const path = source
-    .replace(/^https?:\/\/[^/]+/, '')
-    .replace(/[?#].*$/, '');
-  const segments = path.split('/').filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? '';
-}
-
-/** Extract an agent record from an offeredBy field (object or array). */
-function firstAgent(offeredBy: JsonLdOffer['offeredBy']): JsonLdAgent | undefined {
-  if (!offeredBy) return undefined;
-  if (Array.isArray(offeredBy)) return offeredBy[0];
-  return offeredBy;
-}
-
-/** Extract the brokerage name from an agent's `memberOf` (object or array). */
-function brokerageFrom(agent: JsonLdAgent | undefined): string | undefined {
-  if (!agent?.memberOf) return undefined;
-  if (Array.isArray(agent.memberOf)) return agent.memberOf[0]?.name;
-  return agent.memberOf.name;
+  return lastPathSegment(item.url ?? item['@id'] ?? '');
 }
 
 export function formatHome(item: JsonLdListingItem): FormattedHome | null {
@@ -159,10 +127,7 @@ export function formatHome(item: JsonLdListingItem): FormattedHome | null {
   const addr = main.address ?? {};
   const offers = item.offers ?? {};
   const agent = firstAgent(offers.offeredBy);
-  const sqft =
-    main.floorSize && (main.floorSize.unitCode === 'FTK' || !main.floorSize.unitCode)
-      ? toNumber(main.floorSize.value)
-      : toNumber(main.floorSize?.value);
+  const sqft = toNumber(main.floorSize?.value);
   // homes.com URL is normally fully-qualified in JSON-LD. Fall back to
   // the @id if `url` is missing.
   const url = item.url ?? item['@id'] ?? '';

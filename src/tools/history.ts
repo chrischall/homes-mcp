@@ -12,6 +12,7 @@ import {
   type HTMLElement,
 } from '../html.js';
 import { urlToPath } from '../url.js';
+import { lastPathSegment } from '../jsonld.js';
 import { mapEventType, type NormalizedEventType } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 
@@ -215,13 +216,7 @@ function extractPropertyIdFromHtml(html: string, fallbackUrl: string): string {
     | null;
   // Prefer node.url over node['@id'] — see properties.ts:extractPropertyId
   // (homes.com @id now carries a `#realestatelisting` fragment).
-  const src = node?.url ?? node?.['@id'] ?? fallbackUrl;
-  const segments = src
-    .replace(/^https?:\/\/[^/]+/, '')
-    .replace(/[?#].*$/, '')
-    .split('/')
-    .filter(Boolean);
-  return segments[segments.length - 1] ?? '';
+  return lastPathSegment(node?.url ?? node?.['@id'] ?? fallbackUrl);
 }
 
 export function registerHistoryTools(

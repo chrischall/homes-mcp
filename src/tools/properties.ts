@@ -6,6 +6,13 @@ import { collectAddressAlternates } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { urlToPath } from '../url.js';
 import {
+  toNumber,
+  firstImage,
+  firstAgent,
+  brokerageFrom,
+  lastPathSegment,
+} from '../jsonld.js';
+import {
   parseHtml,
   parseDollar,
   parseIntegerLoose,
@@ -273,51 +280,17 @@ export interface FormatOptions {
   includeTaxHistory?: boolean;
 }
 
-function toNumber(v: unknown): number | undefined {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string') {
-    const cleaned = v.replace(/[^0-9.-]/g, '');
-    if (cleaned === '') return undefined;
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  return undefined;
-}
-
-function firstImage(image: string | string[] | undefined): string | undefined {
-  if (!image) return undefined;
-  if (typeof image === 'string') return image;
-  return image[0];
-}
-
-function firstAgent(offeredBy: JsonLdOffer['offeredBy']): JsonLdAgent | undefined {
-  if (!offeredBy) return undefined;
-  if (Array.isArray(offeredBy)) return offeredBy[0];
-  return offeredBy;
-}
-
-function brokerageFrom(agent: JsonLdAgent | undefined): string | undefined {
-  if (!agent?.memberOf) return undefined;
-  if (Array.isArray(agent.memberOf)) return agent.memberOf[0]?.name;
-  return agent.memberOf.name;
-}
-
 /**
  * Derive a homes.com property id from a listing's `url` or `@id`. We
  * take the last non-empty path segment (e.g. `rxrzwg0kjnr32`).
  *
  * Prefer `url` over `@id` because homes.com's @id now includes a
  * `#realestatelisting` fragment (e.g. `.../abc123/#realestatelisting`)
- * — taking the last path segment would otherwise return the fragment
- * instead of the id. The `url` field is fragment-free.
+ * — `lastPathSegment` strips it (and any `?query`) before taking the
+ * final segment. The `url` field is fragment-free.
  */
 export function extractPropertyId(listing: JsonLdListing): string {
-  const source = listing.url ?? listing['@id'] ?? '';
-  const path = source
-    .replace(/^https?:\/\/[^/]+/, '')
-    .replace(/[?#].*$/, '');
-  const segments = path.split('/').filter((s) => s.length > 0);
-  return segments[segments.length - 1] ?? '';
+  return lastPathSegment(listing.url ?? listing['@id'] ?? '');
 }
 
 /**
@@ -390,7 +363,11 @@ export function format(
     firstImage(listing.image) ??
     firstImage(main.image);
   const sqft = toNumber(main.floorSize?.value);
-  const extras: Partial<FormattedProperty> = html ? extractDomFields(html) : {};
+  // Parse the detail-page HTML ONCE and thread the single root through
+  // both the DOM-field scrape and the (optional) history block below —
+  // format() used to `parseHtml` the same HTML twice.
+  const root = html ? parseHtml(html) : undefined;
+  const extras: Partial<FormattedProperty> = root ? extractDomFields(root) : {};
 
   // P0 (#14): compute extracted_features whenever the listing has a
   // description, even when we'll omit the raw text from the response.
@@ -483,8 +460,8 @@ export function format(
   // #27: optionally inline history series parsed from the same HTML
   // the format call already has. Saves a second round trip vs calling
   // homes_get_property_history / homes_get_tax_history separately.
-  if ((opts.includePriceHistory || opts.includeTaxHistory) && html) {
-    const root = parseHtml(html);
+  // Reuses the single `root` parsed at the top of format().
+  if ((opts.includePriceHistory || opts.includeTaxHistory) && root) {
     if (opts.includePriceHistory) {
       const listing_events = parsePropertyHistory(root);
       out.price_history = {
@@ -574,8 +551,7 @@ export function registerPropertyTools(
  *   - "Listing and Financial Details" <div> with HOA / MLS / Source text
  *   - "Lot Details" / "Parking" / "Utilities" <div> after their <h3>
  */
-function extractDomFields(html: string): Partial<FormattedProperty> {
-  const root = parseHtml(html);
+function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
   const out: Partial<FormattedProperty> = {};
 
   // Highlights
