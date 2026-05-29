@@ -35,7 +35,7 @@ import { registerBulkGetTools } from './tools/bulk-get.js';
 import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
 import { resolvePort } from './index-helpers.js';
 
-const VERSION = '0.11.0'; // x-release-please-version
+const VERSION = '0.12.0'; // x-release-please-version
 
 const port = resolvePort(process.env.HOMES_WS_PORT);
 
