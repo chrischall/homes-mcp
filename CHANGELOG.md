@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.12.0](https://github.com/chrischall/homes-mcp/compare/v0.11.0...v0.12.0) (2026-05-29)
+
+
+### Features
+
+* adopt @fetchproxy/server 0.11.0 parsing helpers (drop local extractImgTags + lastPathSegment) + realty-core 0.4.1 ([#75](https://github.com/chrischall/homes-mcp/issues/75)) ([1385cec](https://github.com/chrischall/homes-mcp/commit/1385cec9d1ea29268d8c706f01d92b869ceeec3e))
+* price_min/price_max on homes_get_by_address search-fallback ([#46](https://github.com/chrischall/homes-mcp/issues/46)) ([#72](https://github.com/chrischall/homes-mcp/issues/72)) ([06bfc7a](https://github.com/chrischall/homes-mcp/commit/06bfc7ac9fc2f7eba2e53afa2e4392344a99b48f))
+
+
+### Bug Fixes
+
+* cap homes_healthcheck probe at 18s with an open-&-interact hint ([#70](https://github.com/chrischall/homes-mcp/issues/70)) ([0c58993](https://github.com/chrischall/homes-mcp/commit/0c58993c1ed43c5c4c0c14c236b72419bb83032f)), closes [#66](https://github.com/chrischall/homes-mcp/issues/66)
+* **ci:** arm auto-merge from verdict comment when structured_output is empty ([#73](https://github.com/chrischall/homes-mcp/issues/73)) ([45b648d](https://github.com/chrischall/homes-mcp/commit/45b648d93f513b0cfe760be8a5a513adb314bbb1))
+* **ci:** treat instant-merge race as success in auto-merge arm ([#71](https://github.com/chrischall/homes-mcp/issues/71)) ([9086236](https://github.com/chrischall/homes-mcp/commit/90862368c9b6ef9d9c5f14781bf30366e44af3c6))
+* resolver timeout taxonomy (single path) + first-class search-fallback rung ([#68](https://github.com/chrischall/homes-mcp/issues/68)) ([612ddf5](https://github.com/chrischall/homes-mcp/commit/612ddf5072da2139e186dd890e8f132060ca5599))
+
 ## [0.11.0](https://github.com/chrischall/homes-mcp/compare/v0.10.0...v0.11.0) (2026-05-29)
 
 
