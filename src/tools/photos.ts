@@ -6,10 +6,8 @@ import { textResult } from '../mcp.js';
 import { lastPathSegment } from '../jsonld.js';
 import { fetchListingRecord } from './properties.js';
 
-// `extractImgTags` (regex-scrape `<img>` `src`/`alt` pairs) was generalized
-// out of this file into @fetchproxy/server's shared SSR-parsing surface; the
-// implementation is byte-identical. We re-export it here so existing import
-// sites (and tests) that pull it FROM this module keep working unchanged.
+// Re-exported from @fetchproxy/server so tests/tools/photos.test.ts (and any
+// other caller importing from this module) keep their import path unchanged.
 export { extractImgTags };
 
 /**
