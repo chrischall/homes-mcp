@@ -1,4 +1,4 @@
-import { withDeadline } from '@fetchproxy/server';
+import { withDeadline } from '@chrischall/mcp-utils/fetchproxy';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';

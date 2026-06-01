@@ -10,7 +10,7 @@
  * `memberOf` field is structurally required here.
  */
 
-import { lastPathSegment as fpLastPathSegment } from '@fetchproxy/server';
+import { lastPathSegment as fpLastPathSegment } from '@chrischall/mcp-utils/fetchproxy';
 
 /** An agent record with the only field the brokerage helper reads. */
 export interface AgentWithMemberOf {
@@ -64,7 +64,7 @@ export function brokerageFrom(
  * `@id` carries a `#realestatelisting` fragment), then splits on `/`.
  * Returns `''` for empty / segment-less / `undefined` input.
  *
- * Thin wrapper over @fetchproxy/server's `lastPathSegment` to preserve
+ * Thin wrapper over `@chrischall/mcp-utils/fetchproxy`'s `lastPathSegment` to preserve
  * the undefined-tolerant call sites across search.ts / properties.ts /
  * history.ts / typeahead.ts / photos.ts (fetchproxy's signature is
  * non-nullable).

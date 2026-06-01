@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { extractImgTags } from '@fetchproxy/server';
+import { extractImgTags } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import { lastPathSegment } from '../jsonld.js';
 import { fetchListingRecord } from './properties.js';
 
-// Re-exported from @fetchproxy/server so tests/tools/photos.test.ts (and any
+// Re-exported (via @chrischall/mcp-utils/fetchproxy) so tests/tools/photos.test.ts (and any
 // other caller importing from this module) keep their import path unchanged.
 export { extractImgTags };
 

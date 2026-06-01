@@ -1,5 +1,6 @@
-// Adapter-level tests for FetchproxyTransport against @fetchproxy/server
-// 0.8.0+. The lazy-revive retry, per-request timeout, and freshness
+// Adapter-level tests for FetchproxyTransport against the FetchproxyServer
+// surface (re-exported through @chrischall/mcp-utils/fetchproxy from
+// @fetchproxy/server 0.8.0+). The lazy-revive retry, per-request timeout, and freshness
 // counters live in the server itself now — we don't re-test them here.
 // What this file covers is the homes-mcp-shaped surface: URL/subdomain
 // routing, BridgeStatus mapping, error pass-through, and start/close.
@@ -10,10 +11,16 @@ import { describe, it, expect, vi } from 'vitest';
 // — 0.10.0 promotes it to a 25_000 default (fetchproxy#72). The mock has
 // to be declared before the SUT import.
 const fetchproxyCtorArgs: unknown[] = [];
-vi.mock('@fetchproxy/server', async () => {
+// The SUT (src/transport-fetchproxy.ts) imports FetchproxyServer (and the
+// typed-error classes) from @chrischall/mcp-utils/fetchproxy, which re-exports
+// the full @fetchproxy/server surface. Mock the subpath — not the underlying
+// dep — so the constructor capture intercepts the actual import site. We spread
+// the real subpath module so FetchproxyBridgeDownError / FetchproxyTimeoutError
+// (re-exported through the SUT) stay the genuine classes for `instanceof`.
+vi.mock('@chrischall/mcp-utils/fetchproxy', async () => {
   const actual =
-    await vi.importActual<typeof import('@fetchproxy/server')>(
-      '@fetchproxy/server'
+    await vi.importActual<typeof import('@chrischall/mcp-utils/fetchproxy')>(
+      '@chrischall/mcp-utils/fetchproxy'
     );
   class StubFetchproxyServer {
     constructor(opts: unknown) {
