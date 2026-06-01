@@ -40,23 +40,12 @@ const port = resolvePort(process.env.HOMES_WS_PORT);
 
 const transport = new FetchproxyTransport({ port, version: VERSION });
 
-// Build the client and bring the fetchproxy bridge up BEFORE registering
-// tools. This preserves the deferred-config pattern: the bridge listens but
-// requires no auth — the user's signed-in homes.com tab supplies credentials
-// per request, so `tools/list` always succeeds and any sign-in error surfaces
-// on the first tool call. The transport outlives the MCP session; runMcp's
-// graceful-shutdown wiring closes it on SIGINT/SIGTERM so ports don't leak
-// between client restarts.
+// client.start() before runMcp: auth is per-request so tools/list succeeds without a signed-in tab.
 const client = new HomesClient({ transport });
 await client.start();
 
 const sessions = new SessionRegistry();
 
-// runMcp builds the McpServer, prints the stderr banner (stdout is reserved
-// for JSON-RPC), applies every registrar in order, installs SIGINT/SIGTERM →
-// client.close() → exit, and connects the stdio transport. The registrar list
-// mixes client-bound tools and the few local-only ones (mortgage,
-// affordability, rent-vs-buy, sessions) — each closes over the dep it needs.
 await runMcp({
   name: 'homes-mcp',
   version: VERSION,

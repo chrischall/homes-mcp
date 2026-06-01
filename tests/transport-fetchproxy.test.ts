@@ -11,12 +11,7 @@ import { describe, it, expect, vi } from 'vitest';
 // — 0.10.0 promotes it to a 25_000 default (fetchproxy#72). The mock has
 // to be declared before the SUT import.
 const fetchproxyCtorArgs: unknown[] = [];
-// The SUT (src/transport-fetchproxy.ts) imports FetchproxyServer (and the
-// typed-error classes) from @chrischall/mcp-utils/fetchproxy, which re-exports
-// the full @fetchproxy/server surface. Mock the subpath — not the underlying
-// dep — so the constructor capture intercepts the actual import site. We spread
-// the real subpath module so FetchproxyBridgeDownError / FetchproxyTimeoutError
-// (re-exported through the SUT) stay the genuine classes for `instanceof`.
+// Mock the subpath, not @fetchproxy/server, so the constructor capture hits the SUT's actual import site.
 vi.mock('@chrischall/mcp-utils/fetchproxy', async () => {
   const actual =
     await vi.importActual<typeof import('@chrischall/mcp-utils/fetchproxy')>(
