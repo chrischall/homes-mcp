@@ -12,8 +12,7 @@
 //
 // The transport outlives the MCP session. On SIGINT/SIGTERM we close it
 // so ports/connections don't leak between client restarts.
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { runMcp } from '@chrischall/mcp-utils';
 import { HomesClient } from './client.js';
 import { FetchproxyTransport } from './transport-fetchproxy.js';
 import { registerSearchTools } from './tools/search.js';
@@ -41,42 +40,48 @@ const port = resolvePort(process.env.HOMES_WS_PORT);
 
 const transport = new FetchproxyTransport({ port, version: VERSION });
 
+// Build the client and bring the fetchproxy bridge up BEFORE registering
+// tools. This preserves the deferred-config pattern: the bridge listens but
+// requires no auth — the user's signed-in homes.com tab supplies credentials
+// per request, so `tools/list` always succeeds and any sign-in error surfaces
+// on the first tool call. The transport outlives the MCP session; runMcp's
+// graceful-shutdown wiring closes it on SIGINT/SIGTERM so ports don't leak
+// between client restarts.
 const client = new HomesClient({ transport });
 await client.start();
 
-const server = new McpServer({ name: 'homes-mcp', version: VERSION });
-
-registerSearchTools(server, client);
-registerPropertyTools(server, client);
-registerMortgageTools(server);
-registerCompareTools(server, client);
-registerAffordabilityTools(server);
-registerPhotosTools(server, client);
-registerHealthcheckTools(server, client);
-registerHistoryTools(server, client);
-registerNearbyTools(server, client);
-registerMarketTools(server, client);
-registerSavedTools(server, client);
-registerRentVsBuyTools(server);
-registerByAddressTools(server, client);
 const sessions = new SessionRegistry();
-registerSessionsTools(server, sessions);
-registerBulkGetTools(server, client);
-registerResolveAddressesTools(server, client);
 
-console.error(
-  `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port ?? 37149}. ` +
+// runMcp builds the McpServer, prints the stderr banner (stdout is reserved
+// for JSON-RPC), applies every registrar in order, installs SIGINT/SIGTERM →
+// client.close() → exit, and connects the stdio transport. The registrar list
+// mixes client-bound tools and the few local-only ones (mortgage,
+// affordability, rent-vs-buy, sessions) — each closes over the dep it needs.
+await runMcp({
+  name: 'homes-mcp',
+  version: VERSION,
+  banner:
+    `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port ?? 37149}. ` +
     'Install the fetchproxy extension (see https://github.com/chrischall/fetchproxy) ' +
     'and sign into homes.com. This project was developed and is maintained by AI (Claude). ' +
-    'Use at your own discretion.'
-);
-
-const shutdown = async () => {
-  await client.close();
-  process.exit(0);
-};
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-
-const stdio = new StdioServerTransport();
-await server.connect(stdio);
+    'Use at your own discretion.',
+  tools: [
+    (server) => registerSearchTools(server, client),
+    (server) => registerPropertyTools(server, client),
+    (server) => registerMortgageTools(server),
+    (server) => registerCompareTools(server, client),
+    (server) => registerAffordabilityTools(server),
+    (server) => registerPhotosTools(server, client),
+    (server) => registerHealthcheckTools(server, client),
+    (server) => registerHistoryTools(server, client),
+    (server) => registerNearbyTools(server, client),
+    (server) => registerMarketTools(server, client),
+    (server) => registerSavedTools(server, client),
+    (server) => registerRentVsBuyTools(server),
+    (server) => registerByAddressTools(server, client),
+    (server) => registerSessionsTools(server, sessions),
+    (server) => registerBulkGetTools(server, client),
+    (server) => registerResolveAddressesTools(server, client),
+  ],
+  shutdown: { onSignal: () => client.close() },
+});

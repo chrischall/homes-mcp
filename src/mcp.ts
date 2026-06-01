@@ -1,15 +1,9 @@
 /**
  * Small helpers for shaping tool responses that the MCP SDK expects.
+ *
+ * `textResult` now lives in `@chrischall/mcp-utils` (the generic MCP glue
+ * hoisted out of the ~19-server fleet) — the local copy was byte-identical.
+ * We re-export it here so every `homes_*` tool keeps importing it from
+ * `./mcp.js` without churn.
  */
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-
-/**
- * Wrap any JSON-serializable value as a text-content MCP tool result.
- * Every `homes_*` tool returns exactly one text block; this removes
- * boilerplate at the bottom of each handler.
- */
-export function textResult(data: unknown): CallToolResult {
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-  };
-}
+export { textResult } from '@chrischall/mcp-utils';
