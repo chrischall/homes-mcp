@@ -13,7 +13,7 @@
 // @fetchproxy/server 0.10.0 (`runProbe`); re-export its result shape so
 // the healthcheck tool can type the projection without reaching into the
 // dep directly.
-import type { BridgeProbeResult } from '@fetchproxy/server';
+import type { BridgeProbeResult } from '@chrischall/mcp-utils/fetchproxy';
 export type { BridgeProbeResult };
 
 export interface FetchInit {

@@ -4,7 +4,7 @@ import {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
   withDeadline,
-} from '@fetchproxy/server';
+} from '@chrischall/mcp-utils/fetchproxy';
 import { addressMatch } from '@chrischall/realty-core';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
