@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/chrischall/homes-mcp/compare/v0.12.0...v0.12.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* adopt @fetchproxy/server 1.0.0 + @chrischall/mcp-utils 0.5.0 ([#86](https://github.com/chrischall/homes-mcp/issues/86)) ([10d3a63](https://github.com/chrischall/homes-mcp/commit/10d3a63111d4b28bef2612bd455a82d671160899))
+
 ## [0.12.0](https://github.com/chrischall/homes-mcp/compare/v0.11.0...v0.12.0) (2026-05-29)
 
 
