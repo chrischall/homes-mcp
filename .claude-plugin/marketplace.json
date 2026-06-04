@@ -7,7 +7,7 @@
   },
   "metadata": {
     "description": "MCP server for homes.com — search listings, fetch property details, photo galleries, compare properties. Routes through the user signed-in homes.com tab via the fetchproxy browser extension to dodge bot detection.",
-    "version": "0.12.0"
+    "version": "0.12.1"
   },
   "plugins": [
     {
@@ -15,7 +15,7 @@
       "displayName": "homes.com",
       "source": "./",
       "description": "MCP server for homes.com — search listings, get property details, photo galleries, compare properties",
-      "version": "0.12.0",
+      "version": "0.12.1",
       "author": {
         "name": "Chris Hall"
       },
