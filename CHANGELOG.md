@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/chrischall/homes-mcp/compare/v0.12.1...v0.12.2) (2026-06-07)
+
+
+### Documentation
+
+* neutral wording for fetchproxy routing in marketplace description ([#88](https://github.com/chrischall/homes-mcp/issues/88)) ([7470880](https://github.com/chrischall/homes-mcp/commit/74708800dcc3295332daa2c24ec4ca235f1143a9))
+
 ## [0.12.1](https://github.com/chrischall/homes-mcp/compare/v0.12.0...v0.12.1) (2026-06-04)
 
 
