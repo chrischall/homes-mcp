@@ -2,105 +2,30 @@ import { parse, type HTMLElement } from 'node-html-parser';
 
 export { HTMLElement };
 
+// The heading-anchored scrapers below were hoisted from this file into
+// @chrischall/mcp-utils/html (shared across the realty cohort). They are
+// re-exported here so this module stays the single import surface for
+// call sites and tests:
+//
+//   - `parsePropertyTable(root, heading)` fuses the old local trio
+//     findTableByHeading / tableHeaderCells / tableRows into one
+//     `{ headers, rows } | null` — same heading walk, same <thead>
+//     scoping, same `<th scope="row">`-aware row collection.
+//   - `findLinksUnderHeading` is the old local helper, slightly
+//     improved: direct-sibling elements are matched against the custom
+//     `selector` too (the local copy hardcoded `tagName === 'A'`).
+//
+// The numeric/date normalizers further down have no upstream home and
+// stay local.
+export {
+  parsePropertyTable,
+  findLinksUnderHeading,
+  type PropertyTable,
+} from '@chrischall/mcp-utils/html';
+
 /** Parse a fragment or full document into a queryable root element. */
 export function parseHtml(html: string): HTMLElement {
   return parse(html, { lowerCaseTagName: false, comment: false });
-}
-
-/**
- * Find the first <h1>/<h2>/<h3>/<h4> whose text contains `heading`
- * (case-insensitive), then return the nearest following <table>.
- *
- * Strategy: walk forward through the heading's siblings, stopping at
- * the next heading. If nothing's found and the heading lives in a
- * dedicated wrapper (<section>/<article>/<aside>), look inside that
- * wrapper (but not the broader parent — peer headings might own peer
- * tables).
- */
-export function findTableByHeading(
-  root: HTMLElement,
-  heading: string
-): HTMLElement | null {
-  const needle = heading.trim().toLowerCase();
-  const headings = root.querySelectorAll('h1, h2, h3, h4');
-  for (const h of headings) {
-    if (!h.text.toLowerCase().includes(needle)) continue;
-    let cur: HTMLElement | null = h.nextElementSibling as HTMLElement | null;
-    while (cur) {
-      if (/^H[1-4]$/.test(cur.tagName)) break;
-      if (cur.tagName === 'TABLE') return cur;
-      const nested = cur.querySelector('table');
-      if (nested) return nested;
-      cur = cur.nextElementSibling as HTMLElement | null;
-    }
-    const parent = h.parentNode as HTMLElement | null;
-    if (parent && /^(SECTION|ARTICLE|ASIDE)$/.test(parent.tagName)) {
-      const inside = parent.querySelector('table');
-      if (inside) return inside;
-    }
-  }
-  return null;
-}
-
-/**
- * Trimmed text of every <th> in a table's header row, in document order.
- *
- * Scoped to `<thead>` when present, otherwise falls back to all `<th>`
- * in the table. This matters because homes.com's tables use
- * `<th scope="row">` for the first cell of every data row (the year /
- * date column) — those should NOT be confused with column headers.
- */
-export function tableHeaderCells(table: HTMLElement): string[] {
-  const thead = table.querySelector('thead');
-  const scope = thead ?? table;
-  return scope.querySelectorAll('th').map((th) => th.text.replace(/\s+/g, ' ').trim());
-}
-
-/**
- * Each <tbody> row as a string[] of trimmed cell text, in document order.
- * Collects both `<th>` and `<td>` because homes.com uses `<th scope="row">`
- * for the leading cell of every data row (year / date column) — dropping
- * those would silently shift every column left by one and corrupt every
- * parsed record.
- */
-export function tableRows(table: HTMLElement): string[][] {
-  const tbody = table.querySelector('tbody') ?? table;
-  return tbody
-    .querySelectorAll('tr')
-    .map((tr) =>
-      tr
-        .querySelectorAll('th, td')
-        .map((cell) => cell.text.replace(/\s+/g, ' ').trim())
-    )
-    .filter((cells) => cells.length > 0);
-}
-
-/**
- * Find all <a> elements that follow a matching heading, up to (but not
- * including) the next sibling heading. Useful for "Homes for Sale"
- * link lists at the bottom of a detail page.
- */
-export function findLinksUnderHeading(
-  root: HTMLElement,
-  heading: string,
-  selector = 'a'
-): HTMLElement[] {
-  const needle = heading.trim().toLowerCase();
-  const headings = root.querySelectorAll('h1, h2, h3, h4');
-  for (const h of headings) {
-    if (!h.text.toLowerCase().includes(needle)) continue;
-    const out: HTMLElement[] = [];
-    // Walk forward siblings until the next heading.
-    let cur: HTMLElement | null = h.nextElementSibling as HTMLElement | null;
-    while (cur) {
-      if (/^H[1-4]$/.test(cur.tagName)) break;
-      if (cur.tagName === 'A') out.push(cur);
-      for (const a of cur.querySelectorAll(selector)) out.push(a);
-      cur = cur.nextElementSibling as HTMLElement | null;
-    }
-    return out;
-  }
-  return [];
 }
 
 /**

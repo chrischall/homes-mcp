@@ -1,9 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseHtml,
-  findTableByHeading,
-  tableHeaderCells,
-  tableRows,
+  parsePropertyTable,
   findLinksUnderHeading,
   normalizeDate,
   parseDollar,
@@ -11,8 +9,25 @@ import {
   parseIntegerLoose,
   parseDecimalLoose,
 } from '../src/html.js';
+import * as upstream from '@chrischall/mcp-utils/html';
 
-describe('findTableByHeading + tableHeaderCells + tableRows', () => {
+// The heading-anchored table/link scrapers were hoisted from this file
+// into @chrischall/mcp-utils/html and are now re-exported here. Pin the
+// re-export identity so a local copy can't silently fork again.
+describe('shared-helper re-exports', () => {
+  it('parsePropertyTable is the @chrischall/mcp-utils/html export', () => {
+    expect(parsePropertyTable).toBe(upstream.parsePropertyTable);
+  });
+  it('findLinksUnderHeading is the @chrischall/mcp-utils/html export', () => {
+    expect(findLinksUnderHeading).toBe(upstream.findLinksUnderHeading);
+  });
+});
+
+// These cases previously tested the local findTableByHeading /
+// tableHeaderCells / tableRows trio; upstream fuses them into
+// parsePropertyTable. Kept as integration pins — they now exercise the
+// upstream code through the src/html.ts re-export.
+describe('parsePropertyTable', () => {
   // Mirrors the real homes.com shape: `<th scope="row">` for the first
   // cell of every data row (year/date column), `<td>` for the rest.
   // Verified live 2026-05-26.
@@ -36,25 +51,24 @@ describe('findTableByHeading + tableHeaderCells + tableRows', () => {
 
   it('locates the table after a matching heading', () => {
     const root = parseHtml(html);
-    const table = findTableByHeading(root, 'Tax History');
-    expect(table).not.toBeNull();
+    expect(parsePropertyTable(root, 'Tax History')).not.toBeNull();
   });
 
   it('returns null when no matching heading exists', () => {
     const root = parseHtml(html);
-    expect(findTableByHeading(root, 'Climate Risk')).toBeNull();
+    expect(parsePropertyTable(root, 'Climate Risk')).toBeNull();
   });
 
   it('reads header cells from <thead> only — ignoring th cells inside tbody data rows', () => {
     const root = parseHtml(html);
-    const t = findTableByHeading(root, 'Tax History')!;
-    expect(tableHeaderCells(t)).toEqual(['Year', 'Tax Paid', 'Assessment']);
+    const t = parsePropertyTable(root, 'Tax History')!;
+    expect(t.headers).toEqual(['Year', 'Tax Paid', 'Assessment']);
   });
 
   it('reads tbody rows including the leading <th scope="row"> cell', () => {
     const root = parseHtml(html);
-    const t = findTableByHeading(root, 'Tax History')!;
-    expect(tableRows(t)).toEqual([
+    const t = parsePropertyTable(root, 'Tax History')!;
+    expect(t.rows).toEqual([
       ['2025', '$2,714', '$72,520'],
       ['2024', '$2,500', '$70,000'],
     ]);
@@ -62,7 +76,7 @@ describe('findTableByHeading + tableHeaderCells + tableRows', () => {
 
   it('case-insensitive heading match', () => {
     const root = parseHtml(html);
-    expect(findTableByHeading(root, 'tax history')).not.toBeNull();
+    expect(parsePropertyTable(root, 'tax history')).not.toBeNull();
   });
 });
 
@@ -89,6 +103,22 @@ describe('findLinksUnderHeading', () => {
   it('returns [] when no matching heading', () => {
     const root = parseHtml(html);
     expect(findLinksUnderHeading(root, 'Climate')).toEqual([]);
+  });
+
+  it('honors a custom selector for direct-sibling elements (upstream improvement)', () => {
+    // The local copy hardcoded `tagName === 'A'` for direct siblings, so a
+    // custom selector only applied to nested elements. The upstream helper
+    // matches direct siblings against the selector too.
+    const root = parseHtml(`
+      <h2>Nearby</h2>
+      <a class="card" href="/one/">One</a>
+      <div><a class="card" href="/two/">Two</a><a href="/plain/">Plain</a></div>
+      <h2>Footer</h2>
+      <a class="card" href="/footer/">F</a>`);
+    const hrefs = findLinksUnderHeading(root, 'Nearby', 'a.card').map((a) =>
+      a.getAttribute('href')
+    );
+    expect(hrefs).toEqual(['/one/', '/two/']);
   });
 });
 
