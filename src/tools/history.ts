@@ -4,8 +4,7 @@ import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
 import {
   parseHtml,
-  findTableByHeading,
-  tableRows,
+  parsePropertyTable,
   normalizeDate,
   parseDollar,
   parsePercent,
@@ -116,9 +115,9 @@ function withDate<T extends { date: string; date_raw?: string }>(
 }
 
 export function parsePropertyHistory(root: HTMLElement): ListingEvent[] {
-  const t = findTableByHeading(root, 'Property History');
+  const t = parsePropertyTable(root, 'Property History');
   if (!t) return [];
-  return tableRows(t)
+  return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [date, event, price, listToSale, ppsf] = cells;
@@ -142,9 +141,9 @@ export function parsePropertyHistory(root: HTMLElement): ListingEvent[] {
 }
 
 export function parseOwnershipHistory(root: HTMLElement): OwnershipEvent[] {
-  const t = findTableByHeading(root, 'Purchase History');
+  const t = parsePropertyTable(root, 'Purchase History');
   if (!t) return [];
-  return tableRows(t)
+  return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [date, deedType, salePrice, titleCo] = cells;
@@ -162,9 +161,9 @@ export function parseOwnershipHistory(root: HTMLElement): OwnershipEvent[] {
 }
 
 export function parseLienHistory(root: HTMLElement): LienEvent[] {
-  const t = findTableByHeading(root, 'Mortgage History');
+  const t = parsePropertyTable(root, 'Mortgage History');
   if (!t) return [];
-  return tableRows(t)
+  return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [date, status, loanAmt, loanType] = cells;
@@ -188,9 +187,9 @@ export interface TaxRecord {
 }
 
 export function parseTaxHistory(root: HTMLElement): TaxRecord[] {
-  const t = findTableByHeading(root, 'Tax History');
+  const t = parsePropertyTable(root, 'Tax History');
   if (!t) return [];
-  return tableRows(t)
+  return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [yearRaw, paid, assess, land, improvement] = cells;
