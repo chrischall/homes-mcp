@@ -232,6 +232,101 @@ describe('homes_bulk_get', () => {
     expect(parsed.results[0].error).toMatch(/^bridge unreachable:/);
   });
 
+  describe('overall hard deadline → partial results, never wedges (#54-parity, D1)', () => {
+    const FAST_TUNING = { overallDeadlineMs: 200 };
+
+    it('a single hung row is backfilled as pending; others still resolve', async () => {
+      const dh = await createTestHarness((server) =>
+        registerBulkGetTools(server, mockClient, FAST_TUNING)
+      );
+      mockFetchHtml.mockImplementation(async (path: string) => {
+        if (path === '/property/x/hang/') {
+          // Never settles — the wedging row from the report.
+          return new Promise(() => {});
+        }
+        const id = path.match(/\/([a-z]+)\/$/)?.[1] ?? 'x';
+        return htmlWith({
+          '@type': ['RealEstateListing', 'Product'],
+          url: `https://www.homes.com/property/foo/id-${id}/`,
+          offers: { price: 100_000 },
+          mainEntity: { address: { streetAddress: `${id} Main St` } },
+        });
+      });
+      const r = await dh.callTool('homes_bulk_get', {
+        urls: ['/property/x/a/', '/property/x/hang/', '/property/x/c/'],
+      });
+      const parsed = parseToolResult<{
+        count: number;
+        pending?: number;
+        results: Array<{
+          url?: string;
+          status?: string;
+          property?: { price?: number };
+          error?: string;
+        }>;
+      }>(r);
+      // One row per input, input order preserved.
+      expect(parsed.count).toBe(3);
+      expect(parsed.results[0].property?.price).toBe(100_000);
+      expect(parsed.results[2].property?.price).toBe(100_000);
+      // The hung row is surfaced as pending — distinct, machine-readable,
+      // and NOT a generic miss / parse error.
+      expect(parsed.results[1].property).toBeUndefined();
+      expect(parsed.results[1].status).toBe('pending');
+      expect(parsed.results[1].error).not.toMatch(/no listing found/i);
+      // Partial-result envelope advertises the pending count.
+      expect(parsed.pending).toBe(1);
+      await dh.close();
+    }, 5000);
+
+    it('does not poison the connection: resolves promptly despite a hung row', async () => {
+      const dh = await createTestHarness((server) =>
+        registerBulkGetTools(server, mockClient, FAST_TUNING)
+      );
+      mockFetchHtml.mockImplementation(async (path: string) => {
+        if (path === '/property/x/hang/') return new Promise(() => {});
+        return htmlWith({
+          '@type': ['RealEstateListing', 'Product'],
+          url: 'https://www.homes.com/property/foo/ok/',
+          offers: { price: 1 },
+          mainEntity: { address: { streetAddress: '1 Main St' } },
+        });
+      });
+      const start = Date.now();
+      const r = await dh.callTool('homes_bulk_get', {
+        urls: ['/property/x/a/', '/property/x/hang/', '/property/x/c/'],
+      });
+      const elapsed = Date.now() - start;
+      expect(r.isError).toBeFalsy();
+      expect(elapsed).toBeLessThan(3000);
+      await dh.close();
+    }, 5000);
+
+    it('all rows resolving before the deadline → no pending marker', async () => {
+      const dh = await createTestHarness((server) =>
+        registerBulkGetTools(server, mockClient, FAST_TUNING)
+      );
+      mockFetchHtml.mockImplementation(async () =>
+        htmlWith({
+          '@type': ['RealEstateListing', 'Product'],
+          url: 'https://www.homes.com/property/foo/ok/',
+          offers: { price: 1 },
+          mainEntity: { address: { streetAddress: '1 Main St' } },
+        })
+      );
+      const r = await dh.callTool('homes_bulk_get', {
+        urls: ['/property/x/a/', '/property/x/b/'],
+      });
+      const parsed = parseToolResult<{
+        pending?: number;
+        results: Array<{ status?: string; error?: string }>;
+      }>(r);
+      expect(parsed.pending ?? 0).toBe(0);
+      expect(parsed.results.every((row) => row.error === undefined)).toBe(true);
+      await dh.close();
+    });
+  });
+
   it('omits description by default and accepts include_description', async () => {
     mockFetchHtml.mockResolvedValue(
       htmlWith({
