@@ -111,6 +111,7 @@ describe('findLinksUnderHeading', () => {
     // matches direct siblings against the selector too.
     const root = parseHtml(`
       <h2>Nearby</h2>
+      <a href="/unclassed/">Unclassed</a>
       <a class="card" href="/one/">One</a>
       <div><a class="card" href="/two/">Two</a><a href="/plain/">Plain</a></div>
       <h2>Footer</h2>
@@ -118,6 +119,8 @@ describe('findLinksUnderHeading', () => {
     const hrefs = findLinksUnderHeading(root, 'Nearby', 'a.card').map((a) =>
       a.getAttribute('href')
     );
+    // The old local copy took every direct-sibling <a> regardless of the
+    // selector, so it would have included /unclassed/ here.
     expect(hrefs).toEqual(['/one/', '/two/']);
   });
 });
