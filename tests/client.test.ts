@@ -125,6 +125,28 @@ describe('HomesClient', () => {
     await expect(client.fetchHtml('/x')).rejects.toThrow(/500/);
   });
 
+  it('redacts Bearer/JWT secrets from the non-2xx error body preview', async () => {
+    const secret = 'leaked-session-token-1a2b3c4d';
+    const client = new HomesClient({
+      transport: stubTransport(async () => ({
+        status: 403,
+        body: `<html>Forbidden.\n  Authorization: Bearer ${secret}\n</html>`,
+        url: 'https://www.homes.com/customer/dashboard/favorites/',
+      })),
+    });
+    const err: Error = await client
+      .fetchHtml('/customer/dashboard/favorites/')
+      .then(
+        () => {
+          throw new Error('expected rejection');
+        },
+        (e: Error) => e
+      );
+    expect(err.message).toContain('403');
+    expect(err.message).not.toContain(secret);
+    expect(err.message).toContain('Bearer [REDACTED]');
+  });
+
   it('fetchJson POSTs JSON and parses the reply', async () => {
     const client = new HomesClient({
       transport: stubTransport(async (init) => {
