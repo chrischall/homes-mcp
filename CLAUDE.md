@@ -43,7 +43,9 @@ src/
   index-helpers.ts      # pure entrypoint helpers (resolvePort) — unit-
                         #   testable without running the boot sequence
   transport.ts          # HomesTransport interface
-  transport-fetchproxy.ts # adapter over @fetchproxy/server's FetchproxyServer
+  transport-fetchproxy.ts # thin delegate over mcp-utils' createFetchproxyTransport
+                        #   (FetchproxyServer construction + logListening banner +
+                        #   start/close + fetch/requestJson/runProbe verbs)
   client.ts             # HomesClient.fetchHtml / fetchJson
                         #   + sign-in detection (WAF challenge / /sign-in redirect)
   page-state.ts         # extractJsonLd + findGraphNode helpers

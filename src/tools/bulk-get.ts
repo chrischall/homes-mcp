@@ -1,11 +1,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { runBoundedBatch } from '@chrischall/mcp-utils';
 import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
-  mapWithConcurrency,
   retryOnceOnTimeout,
-  withDeadline,
 } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
 import { textResult } from '../mcp.js';
@@ -108,67 +107,59 @@ export function registerBulkGetTools(
       },
     },
     async ({ urls, include_description }) => {
-      // #54 partial-results contract (D1). Seed every row as `'pending'`
-      // up front, then overwrite each in place as its fetch settles. If
-      // the overall deadline fires before a row finishes, it stays
-      // `'pending'` — so the caller always gets a full-length,
-      // input-ordered array with a status for every URL, even when the
-      // batch is too big / homes.com too slow to finish in time. A bulk
-      // tool that wedges the whole MCP connection on a large input is
-      // worse than one that returns "here's what I got, retry the rest".
-      const rows: BulkRow[] = urls.map((url) => ({
-        url,
-        status: 'pending',
-        error:
-          'bulk_get overall deadline reached before this row settled — the ' +
-          'request is still pending (likely a slow/hung sub-request). Re-run ' +
-          'just the pending URLs; a single slow row no longer wedges the batch.',
-      }));
-
-      // Bounded fan-out via @fetchproxy/server 0.9.x bulk helpers:
-      // BRIDGE_CONCURRENCY (=6) caps in-flight requests so a wide
-      // batch doesn't tip the bridge into timeouts (round-3 #78);
-      // retryOnceOnTimeout absorbs the rotating-tab tax that hits
-      // the first request to a stale tab; classifyRowError keeps
-      // bridge timeouts / bridge-down distinct from real per-row
-      // parse errors so a summary like "20/20 with 2 timeouts"
-      // can't be confused with "20/20 with 2 missing listings".
-      // Results are written into index-addressable slots so a partial
-      // (deadline-cut) batch still reports every input URL in order.
-      const indexed = urls.map((url, index) => ({ url, index }));
-      const fanOut = mapWithConcurrency<{ url: string; index: number }, void>(
-        indexed,
-        BRIDGE_CONCURRENCY,
-        async ({ url, index }) => {
-          try {
-            const { listing, html } = await retryOnceOnTimeout(() =>
-              fetchListingRecord(client, { url })
-            );
-            const formatted = format(listing, html, {
-              includeDescription: include_description,
-            });
-            rows[index] = {
-              url,
-              status: 'ok',
-              property_id: formatted.property_id,
-              property: formatted,
-            };
-          } catch (e) {
-            rows[index] = {
-              url,
-              status: 'error',
-              error: classifyRowError(e).message,
-            };
-          }
+      // #54 partial-results contract (D1), now via `runBoundedBatch`
+      // (mcp-utils 0.8 — the slot-array + overall-deadline + pending-backfill
+      // pattern hoisted out of the cohort's hand-rolled `runWithDeadline`,
+      // with the worker + concurrency folded in). It returns a full-length,
+      // input-ordered `BulkRow[]` with exactly one row per URL:
+      //
+      //   - `worker(url)` fetches + formats and returns the `ok` row, throwing
+      //     on failure. retryOnceOnTimeout absorbs the rotating-tab tax that
+      //     hits the first request to a stale tab.
+      //   - `onError(url, _i, e)` backfills the `error` row. classifyRowError
+      //     keeps bridge timeouts / bridge-down distinct from real per-row
+      //     parse errors so a "20/20 with 2 timeouts" summary can't be
+      //     confused with "20/20 with 2 missing listings".
+      //   - `onTimeout(url)` backfills the `pending` row when the overall
+      //     deadline cuts an unsettled slot — distinct from an error row so a
+      //     caller can re-run just the pending URLs. A permanently-hung row is
+      //     abandoned (never awaited) rather than wedging the connection.
+      //   - `concurrency: BRIDGE_CONCURRENCY` (=6) caps in-flight requests so a
+      //     wide batch doesn't tip the bridge into timeouts (round-3 #78).
+      const rows = await runBoundedBatch<string, BulkRow>(
+        urls,
+        async (url) => {
+          const { listing, html } = await retryOnceOnTimeout(() =>
+            fetchListingRecord(client, { url })
+          );
+          const formatted = format(listing, html, {
+            includeDescription: include_description,
+          });
+          return {
+            url,
+            status: 'ok',
+            property_id: formatted.property_id,
+            property: formatted,
+          };
+        },
+        {
+          deadlineMs: overallDeadlineMs,
+          concurrency: BRIDGE_CONCURRENCY,
+          onError: (url, _index, e) => ({
+            url,
+            status: 'error',
+            error: classifyRowError(e).message,
+          }),
+          onTimeout: (url) => ({
+            url,
+            status: 'pending',
+            error:
+              'bulk_get overall deadline reached before this row settled — the ' +
+              'request is still pending (likely a slow/hung sub-request). Re-run ' +
+              'just the pending URLs; a single slow row no longer wedges the batch.',
+          }),
         }
       );
-
-      // Race the whole fan-out against the overall hard deadline (D1). On
-      // expiry the in-flight `fanOut` promise is abandoned (left to settle
-      // in the background and ignored) — we do NOT await it, so a
-      // permanently-hung row can't wedge the connection; its slot keeps
-      // the seeded `'pending'` marker.
-      await withDeadline(fanOut, overallDeadlineMs);
 
       const pending = rows.filter((r) => r.status === 'pending').length;
       const envelope: {
