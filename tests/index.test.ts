@@ -16,7 +16,7 @@ import { registerMarketTools } from '../src/tools/market.js';
 import { registerSavedTools } from '../src/tools/saved.js';
 import { registerRentVsBuyTools } from '../src/tools/rent-vs-buy.js';
 import { registerByAddressTools } from '../src/tools/by-address.js';
-import { SessionRegistry } from '../src/sessions.js';
+import { createSessionRegistry } from '@chrischall/mcp-utils/session';
 import { registerSessionsTools } from '../src/tools/sessions.js';
 import { registerBulkGetTools } from '../src/tools/bulk-get.js';
 import { registerResolveAddressesTools } from '../src/tools/resolve-addresses.js';
@@ -98,7 +98,7 @@ describe('tool registration', () => {
       registerSavedTools(server, mockClient);
       registerRentVsBuyTools(server);
       registerByAddressTools(server, mockClient);
-      registerSessionsTools(server, new SessionRegistry());
+      registerSessionsTools(server, createSessionRegistry());
       registerBulkGetTools(server, mockClient);
       registerResolveAddressesTools(server, mockClient);
     });

@@ -1,82 +1,88 @@
 /**
- * SessionRegistry — multi-session bookkeeping (#20, #21).
+ * Shared SessionRegistry — multi-session bookkeeping (#20, #21).
  *
- * The homes-mcp transport physically bridges to ONE fetchproxy
- * extension at a time (Chrome can have only one extension instance per
- * profile binding to our WebSocket). What the registry provides is a
- * labelled-context layer on top: callers can register multiple
- * sessions, switch the active one, and surface the full set in the
- * diagnostic tool — so the workflow of "I have homes.com signed in
- * under two different accounts" is at least visible end-to-end even
- * though the physical bridge still routes to whichever account the
- * browser has loaded right now.
+ * As of the Wave-6 fleet audit the hand-rolled `src/sessions.ts` registry
+ * was replaced by the fleet-shared `createSessionRegistry()` from
+ * `@chrischall/mcp-utils/session`. The registry's own invariants are
+ * covered by the mcp-utils test suite; these tests pin the behaviours
+ * homes-mcp relies on against the shared API:
+ *
+ *   - sessions are keyed by `account_identity` (required, non-empty);
+ *   - the registry starts EMPTY (no seeded default) and the first
+ *     registered session becomes active;
+ *   - `setActive` returns a boolean (false for unknown ids);
+ *   - `register` + `setActive` together give register-and-activate.
+ *
+ * The homes-mcp transport physically bridges to ONE fetchproxy extension
+ * at a time; the registry is a labelled-context layer on top so the
+ * "signed in under two accounts" workflow stays visible end-to-end.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SessionRegistry } from '../src/sessions.js';
+import {
+  createSessionRegistry,
+  type SessionRegistry,
+} from '@chrischall/mcp-utils/session';
 
-describe('SessionRegistry', () => {
+describe('shared SessionRegistry (homes adoption)', () => {
   let registry: SessionRegistry;
   beforeEach(() => {
-    registry = new SessionRegistry();
+    registry = createSessionRegistry();
   });
 
-  it('starts with a single default session active', () => {
+  it('starts empty — no seeded default session', () => {
     const ctx = registry.getContext();
-    expect(ctx.sessions).toHaveLength(1);
-    expect(ctx.active_session_id).toBe(ctx.sessions[0].session_id);
+    expect(ctx.sessions).toHaveLength(0);
+    expect(ctx.active_session_id).toBeNull();
   });
 
-  it('register adds a session, returns its id, leaves active unchanged unless markActive', () => {
-    const initialActive = registry.activeSessionId();
-    const id = registry.register({ account_hint: 'me@example.com' });
-    expect(id).toBeTruthy();
+  it('first registered session becomes active', () => {
+    const s = registry.register({ account_identity: 'me@example.com' });
+    expect(registry.activeSessionId()).toBe(s.session_id);
+    expect(registry.getContext().sessions).toHaveLength(1);
+  });
+
+  it('a second register leaves the active pointer unchanged', () => {
+    const first = registry.register({ account_identity: 'a@example.com' });
+    registry.register({ account_identity: 'b@example.com' });
+    expect(registry.activeSessionId()).toBe(first.session_id);
     expect(registry.getContext().sessions).toHaveLength(2);
-    expect(registry.activeSessionId()).toBe(initialActive);
   });
 
-  it('register({ markActive: true }) flips the active pointer', () => {
-    const id = registry.register({
-      account_hint: 'partner@example.com',
-      markActive: true,
-    });
-    expect(registry.activeSessionId()).toBe(id);
+  it('register + setActive gives register-and-activate', () => {
+    registry.register({ account_identity: 'a@example.com' });
+    const second = registry.register({ account_identity: 'b@example.com' });
+    expect(registry.setActive(second.session_id)).toBe(true);
+    expect(registry.activeSessionId()).toBe(second.session_id);
   });
 
-  it('setActive switches to an existing session', () => {
-    const id = registry.register({ account_hint: 'a' });
-    registry.setActive(id);
-    expect(registry.activeSessionId()).toBe(id);
+  it('setActive returns false for an unknown session id', () => {
+    expect(registry.setActive('does-not-exist')).toBe(false);
   });
 
-  it('setActive throws for an unknown session id', () => {
-    expect(() => registry.setActive('does-not-exist')).toThrow(/no such session/i);
+  it('re-registering the same account_identity updates in place', () => {
+    const first = registry.register({ account_identity: 'me@example.com' });
+    const again = registry.register({ account_identity: 'me@example.com' });
+    expect(again.session_id).toBe(first.session_id);
+    expect(registry.getContext().sessions).toHaveLength(1);
   });
 
-  it('getContext returns all sessions with stable ordering', () => {
-    const a = registry.register({ account_hint: 'a' });
-    const b = registry.register({ account_hint: 'b' });
+  it('account_identity surfaces back in the session record', () => {
+    const s = registry.register({ account_identity: 'me@example.com' });
     const ctx = registry.getContext();
-    expect(ctx.sessions.map((s) => s.account_hint)).toEqual([
-      undefined,
-      'a',
-      'b',
-    ]);
-    expect(ctx.sessions[1].session_id).toBe(a);
-    expect(ctx.sessions[2].session_id).toBe(b);
+    const row = ctx.sessions.find((r) => r.session_id === s.session_id)!;
+    expect(row.account_identity).toBe('me@example.com');
   });
 
-  it('account_hint surfaces back in the session record', () => {
-    const id = registry.register({ account_hint: 'me@example.com' });
-    const ctx = registry.getContext();
-    const row = ctx.sessions.find((s) => s.session_id === id)!;
-    expect(row.account_hint).toBe('me@example.com');
+  it('rejects an empty account_identity', () => {
+    expect(() => registry.register({ account_identity: '  ' })).toThrow(
+      /account_identity/i
+    );
   });
 
   it('every session_id is unique', () => {
     const ids = new Set<string>();
-    ids.add(registry.activeSessionId());
-    for (let i = 0; i < 5; i++) {
-      ids.add(registry.register({ account_hint: `acct-${i}` }));
+    for (let i = 0; i < 6; i++) {
+      ids.add(registry.register({ account_identity: `acct-${i}` }).session_id);
     }
     expect(ids.size).toBe(6);
   });
