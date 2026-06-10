@@ -6,12 +6,12 @@
     "url": "https://github.com/chrischall/homes-mcp",
     "source": "github"
   },
-  "version": "0.12.2",
+  "version": "1.0.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "homes-mcp",
-      "version": "0.12.2",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       },

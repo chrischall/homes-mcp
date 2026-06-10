@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.0.0](https://github.com/chrischall/homes-mcp/compare/v0.12.2...v1.0.0) (2026-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sessions:** homes_register_session's input param account_hint (optional, free-text) is replaced by account_identity (required, min 1 char), matching the shared fleet schema (zillow/redfin). Callers that relied on registering an unlabelled session, or that passed account_hint, must now pass a non-empty account_identity. The register response shape is now { session, active_session_id } (was { session_id, active }). The mark_active param is RETAINED and unchanged. set_active_session and get_session_context tool names/inputs are unchanged.
+
+### Bug Fixes
+
+* bound homes_bulk_get with an overall deadline + pending backfill ([#96](https://github.com/chrischall/homes-mcp/issues/96)) ([8e3f4e7](https://github.com/chrischall/homes-mcp/commit/8e3f4e73b63395be020b0b523cdaae744aa60711))
+* redact secrets from non-2xx error body previews ([#93](https://github.com/chrischall/homes-mcp/issues/93)) ([7003942](https://github.com/chrischall/homes-mcp/commit/70039423caab235f4a0667307eefc29ccc350675))
+
+
+### Refactor
+
+* adopt mcp-utils 0.10 fetchproxy factory + runBoundedBatch ([#99](https://github.com/chrischall/homes-mcp/issues/99)) ([ab872e8](https://github.com/chrischall/homes-mcp/commit/ab872e824f474bf113546955acc0d2bc269946a6))
+* adopt shared HTML helpers from @chrischall/mcp-utils 0.7.0 ([#95](https://github.com/chrischall/homes-mcp/issues/95)) ([9c800a6](https://github.com/chrischall/homes-mcp/commit/9c800a6b5638fbdd23af28c7ef39c9fd7419b312))
+* **features:** adopt mcp-utils createCachedJsonArrayLoader ([#98](https://github.com/chrischall/homes-mcp/issues/98)) ([f565bbe](https://github.com/chrischall/homes-mcp/commit/f565bbed803f193d46fce3fd26616071509a5c96))
+* **sessions:** adopt shared registerSessionTools ([#97](https://github.com/chrischall/homes-mcp/issues/97)) ([966eab1](https://github.com/chrischall/homes-mcp/commit/966eab1780315fc1bf4ab2dcb5a5e69a40fd3c73))
+
 ## [0.12.2](https://github.com/chrischall/homes-mcp/compare/v0.12.1...v0.12.2) (2026-06-07)
 
 
