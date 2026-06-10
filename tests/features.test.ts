@@ -287,7 +287,9 @@ describe('loadCommunities', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.HOMES_COMMUNITIES_FILE = join(dir, 'no-such-file.json');
     expect(loadCommunities()).toEqual(DEFAULT_COMMUNITIES);
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining('not found'));
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining('HOMES_COMMUNITIES_FILE')
+    );
     spy.mockRestore();
   });
 
