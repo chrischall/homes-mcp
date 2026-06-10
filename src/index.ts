@@ -28,7 +28,7 @@ import { registerMarketTools } from './tools/market.js';
 import { registerSavedTools } from './tools/saved.js';
 import { registerRentVsBuyTools } from './tools/rent-vs-buy.js';
 import { registerByAddressTools } from './tools/by-address.js';
-import { SessionRegistry } from './sessions.js';
+import { createSessionRegistry } from '@chrischall/mcp-utils/session';
 import { registerSessionsTools } from './tools/sessions.js';
 import { registerBulkGetTools } from './tools/bulk-get.js';
 import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
@@ -44,7 +44,7 @@ const transport = new FetchproxyTransport({ port, version: VERSION });
 const client = new HomesClient({ transport });
 await client.start();
 
-const sessions = new SessionRegistry();
+const sessions = createSessionRegistry();
 
 await runMcp({
   name: 'homes-mcp',

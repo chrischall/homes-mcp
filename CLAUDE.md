@@ -30,9 +30,9 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_resolve_addresses` | `tools/resolve-addresses.ts` | Bulk `homes_get_by_address` — up to 100 `{ address, city, state, zip? }`, same rungs/verification, input order preserved, per-row outcomes (`property_hash`→`property_id`). | read |
 | `homes_bulk_get` | `tools/bulk-get.ts` | Bulk `homes_get_property` — up to 200 URLs, per-row errors captured, input order preserved (structured records only). | read |
 | `homes_get_history` | `tools/history.ts` | Same SSR detail page — combined price + tax history (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`, `tax_records`). Preferred over the two deprecated split tools. | read |
-| `homes_get_session_context` | `tools/sessions.ts` | (local; session registry) — list all registered logical sessions | read |
-| `homes_register_session` | `tools/sessions.ts` | (local; session registry) — register an additional logical session | read |
-| `homes_set_active_session` | `tools/sessions.ts` | (local; session registry) — switch the active logical session | read |
+| `homes_get_session_context` | `tools/sessions.ts` | (local; shared session registry) — list all registered logical sessions + `active_session_id` | read |
+| `homes_register_session` | `tools/sessions.ts` | (local; shared session registry) — register/refresh a session keyed by `account_identity` (required); optional `auth_expires_at`; `mark_active` (default false) registers-and-activates | write (registry) |
+| `homes_set_active_session` | `tools/sessions.ts` | (local; shared session registry) — switch the active logical session by `session_id` | write (registry) |
 
 ## Architecture
 
@@ -82,7 +82,9 @@ src/
     resolve-addresses.ts # homes_resolve_addresses (bulk by-address, ≤100)
     bulk-get.ts         # homes_bulk_get (bulk get_property, ≤200)
     sessions.ts         # homes_get_session_context / register_session /
-                        #   set_active_session (local session registry)
+                        #   set_active_session — thin wrapper over the shared
+                        #   registerSessionTools from @chrischall/mcp-utils/session
+                        #   (registry built via createSessionRegistry in index.ts)
 
 tests/                  # 1:1 mirror of src/, plus tests/helpers.ts harness.
                         #   All tests mock HomesClient.fetchHtml.
