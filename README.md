@@ -1,5 +1,9 @@
 # homes-mcp
 
+[![CI](https://github.com/chrischall/homes-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/chrischall/homes-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/homes-mcp)](https://www.npmjs.com/package/homes-mcp)
+[![license](https://img.shields.io/npm/l/homes-mcp)](LICENSE)
+
 homes.com real-estate access as an MCP server for Claude — search listings, resolve addresses, fetch property details, price/tax history, market reports, saved homes, photo galleries, and run affordability/mortgage math, all via natural language.
 
 > ⚠️ homes.com does not publish a public consumer API. This server reads the same server-rendered HTML and Schema.org JSON-LD that homes.com itself ships to your browser, routed through your own signed-in browser tab via the [fetchproxy](https://github.com/chrischall/fetchproxy) extension. Every request acts on behalf of your existing session — your cookies, your TLS, your JS context — exactly as if you'd clicked it in the browser yourself. Treat this as informal use of homes.com. Use at your own discretion.
