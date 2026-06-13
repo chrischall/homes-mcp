@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.1](https://github.com/chrischall/homes-mcp/compare/v1.0.0...v1.0.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* bot PRs bypass the CI gate unconditionally ([#103](https://github.com/chrischall/homes-mcp/issues/103)) ([08cc701](https://github.com/chrischall/homes-mcp/commit/08cc701ada669f3a7a361d42a67f1a0a93b3dcb7))
+
+
+### Documentation
+
+* add MIT LICENSE file and README badges ([#100](https://github.com/chrischall/homes-mcp/issues/100)) ([71c3869](https://github.com/chrischall/homes-mcp/commit/71c38694fc0528226fc8234f0b3638ca05904f48))
+
 ## [1.0.0](https://github.com/chrischall/homes-mcp/compare/v0.12.2...v1.0.0) (2026-06-10)
 
 
