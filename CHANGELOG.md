@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/chrischall/homes-mcp/compare/v1.0.1...v1.0.2) (2026-06-15)
+
+
+### Documentation
+
+* audit CLAUDE.md + add auto-review follow-up convention ([#109](https://github.com/chrischall/homes-mcp/issues/109)) ([9a7dbbe](https://github.com/chrischall/homes-mcp/commit/9a7dbbebc36028ef8caf656dffe57c72d2c4bcf6))
+* require Conventional Commit PR titles for release-please ([#107](https://github.com/chrischall/homes-mcp/issues/107)) ([d2ae924](https://github.com/chrischall/homes-mcp/commit/d2ae9248041315f9761849a9f7e21e9dd4eb0a5e))
+
 ## [1.0.1](https://github.com/chrischall/homes-mcp/compare/v1.0.0...v1.0.1) (2026-06-13)
 
 
