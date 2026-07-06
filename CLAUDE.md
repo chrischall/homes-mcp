@@ -40,8 +40,6 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 src/
   index.ts              # entry — builds FetchproxyTransport, HomesClient,
                         #   registers tool groups, connects stdio transport
-  index-helpers.ts      # pure entrypoint helpers (resolvePort) — unit-
-                        #   testable without running the boot sequence
   transport.ts          # HomesTransport interface
   transport-fetchproxy.ts # thin delegate over mcp-utils' createFetchproxyTransport
                         #   (FetchproxyServer construction + logListening banner +

@@ -12,7 +12,7 @@
 //
 // The transport outlives the MCP session. On SIGINT/SIGTERM we close it
 // so ports/connections don't leak between client restarts.
-import { runMcp } from '@chrischall/mcp-utils';
+import { readPortEnv, runMcp } from '@chrischall/mcp-utils';
 import { HomesClient } from './client.js';
 import { FetchproxyTransport } from './transport-fetchproxy.js';
 import { registerSearchTools } from './tools/search.js';
@@ -32,11 +32,12 @@ import { createSessionRegistry } from '@chrischall/mcp-utils/session';
 import { registerSessionsTools } from './tools/sessions.js';
 import { registerBulkGetTools } from './tools/bulk-get.js';
 import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
-import { resolvePort } from './index-helpers.js';
 
 const VERSION = '1.0.2'; // x-release-please-version
 
-const port = resolvePort(process.env.HOMES_WS_PORT);
+// Shared strict port parser: integer 1–65535 or the fetchproxy default
+// (37149) on anything unset/unparseable.
+const port = readPortEnv('HOMES_WS_PORT', 37149);
 
 const transport = new FetchproxyTransport({ port, version: VERSION });
 
@@ -50,7 +51,7 @@ await runMcp({
   name: 'homes-mcp',
   version: VERSION,
   banner:
-    `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port ?? 37149}. ` +
+    `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port}. ` +
     'Install the fetchproxy extension (see https://github.com/chrischall/fetchproxy) ' +
     'and sign into homes.com. This project was developed and is maintained by AI (Claude). ' +
     'Use at your own discretion.',
