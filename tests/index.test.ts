@@ -20,7 +20,6 @@ import { createSessionRegistry } from '@chrischall/mcp-utils/session';
 import { registerSessionsTools } from '../src/tools/sessions.js';
 import { registerBulkGetTools } from '../src/tools/bulk-get.js';
 import { registerResolveAddressesTools } from '../src/tools/resolve-addresses.js';
-import { resolvePort } from '../src/index-helpers.js';
 import { createTestHarness } from './helpers.js';
 
 const mockClient = {
@@ -57,30 +56,10 @@ afterAll(async () => {
   if (harness) await harness.close();
 });
 
-describe('resolvePort', () => {
-  it('returns undefined when HOMES_WS_PORT is unset (transport picks the default)', () => {
-    expect(resolvePort(undefined)).toBeUndefined();
-  });
-
-  it('returns the parsed integer for a valid numeric string', () => {
-    expect(resolvePort('40000')).toBe(40000);
-  });
-
-  it('returns undefined for a NaN value rather than passing NaN through', () => {
-    // `Number("foo")` is NaN — which is falsy-but-not-undefined and would
-    // otherwise reach the transport as a bogus port. Guard with
-    // Number.isFinite and fall back to the default (undefined).
-    expect(resolvePort('foo')).toBeUndefined();
-  });
-
-  it('returns undefined for an empty string', () => {
-    expect(resolvePort('')).toBeUndefined();
-  });
-
-  it('returns undefined for a non-finite numeric expression', () => {
-    expect(resolvePort('Infinity')).toBeUndefined();
-  });
-});
+// Port resolution moved to the shared readPortEnv('HOMES_WS_PORT', 37149)
+// from @chrischall/mcp-utils (strict integer + 1–65535 range, fallback on
+// anything unparseable) — its semantics are unit-tested upstream in
+// mcp-utils, so the local resolvePort suite is gone with the helper.
 
 describe('tool registration', () => {
   it('registers every advertised homes_* tool', async () => {

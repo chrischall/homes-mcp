@@ -14,7 +14,10 @@
 //
 // Error mapping (non-2xx, sign-in interstitial, empty 204 body) lives
 // here so tool authors never have to think about it.
-import { truncateErrorMessage } from '@chrischall/mcp-utils';
+import {
+  SessionNotAuthenticatedError,
+  truncateErrorMessage,
+} from '@chrischall/mcp-utils';
 import type {
   BridgeProbeResult,
   BridgeStatus,
@@ -22,15 +25,15 @@ import type {
   HomesTransport,
 } from './transport.js';
 
-export class SessionNotAuthenticatedError extends Error {
-  constructor() {
-    super(
-      'Not signed in to homes.com (or AWS WAF challenge interstitial returned). ' +
-        'Open homes.com in your browser, complete sign-in / WAF challenge, then try again.'
-    );
-    this.name = 'SessionNotAuthenticatedError';
-  }
-}
+// The canonical parameterized SessionNotAuthenticatedError lives in
+// @chrischall/mcp-utils; re-exported so existing `./client.js`
+// importers keep working. Thrown below as
+// `new SessionNotAuthenticatedError('Homes.com', 'homes.com')` — the
+// message names Homes.com + the sign-in host and the instance carries
+// a machine-readable `hint`. The homes-specific AWS WAF guidance the
+// old local class baked into its message is appended at the throw site
+// (`throwIfSignInPage`) when the WAF signal is what tripped.
+export { SessionNotAuthenticatedError };
 
 export interface HomesClientOptions {
   /** Transport used to relay fetches to the user's browser. */
@@ -142,11 +145,22 @@ export class HomesClient {
     //
     // We deliberately do NOT body-match `/sign-in` since every signed-in
     // homes.com page has a "Sign in" link in its nav.
-    const looksLikeSignIn =
-      /\/sign-in(\?|$)/.test(result.url) ||
-      (result.body.includes('awswaf.com') &&
-        result.body.includes('challenge.js') &&
-        result.body.length < 80_000);
-    if (looksLikeSignIn) throw new SessionNotAuthenticatedError();
+    const isSignInRedirect = /\/sign-in(\?|$)/.test(result.url);
+    const isWafChallenge =
+      result.body.includes('awswaf.com') &&
+      result.body.includes('challenge.js') &&
+      result.body.length < 80_000;
+    if (!isSignInRedirect && !isWafChallenge) return;
+    const err = new SessionNotAuthenticatedError('Homes.com', 'homes.com');
+    if (isWafChallenge) {
+      // Load-bearing homes.com-specific guidance (formerly baked into the
+      // local error class): the block may be the AWS WAF interstitial
+      // rather than a missing session, and the fix is to clear the
+      // challenge in the browser, not just sign in.
+      err.message +=
+        ' An AWS WAF challenge interstitial was returned — open homes.com' +
+        ' in your browser and complete the challenge, then retry.';
+    }
+    throw err;
   }
 }

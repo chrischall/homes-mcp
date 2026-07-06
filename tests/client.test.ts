@@ -83,8 +83,17 @@ describe('HomesClient', () => {
         url: 'https://www.homes.com/sign-in',
       })),
     });
-    await expect(client.fetchHtml('/favorites')).rejects.toBeInstanceOf(
-      SessionNotAuthenticatedError
+    const err = await client.fetchHtml('/favorites').then(
+      () => {
+        throw new Error('expected fetchHtml to reject');
+      },
+      (e: unknown) => e
+    );
+    // Shared mcp-utils error, parameterized with the service + sign-in host.
+    expect(err).toBeInstanceOf(SessionNotAuthenticatedError);
+    expect((err as Error).message).toContain('Not signed in to Homes.com.');
+    expect((err as Error).message).toContain(
+      'Open homes.com in your browser and sign in, then try again.'
     );
   });
 
@@ -97,9 +106,18 @@ describe('HomesClient', () => {
         url: 'https://www.homes.com/x',
       })),
     });
-    await expect(client.fetchHtml('/x')).rejects.toBeInstanceOf(
-      SessionNotAuthenticatedError
+    const err = await client.fetchHtml('/x').then(
+      () => {
+        throw new Error('expected fetchHtml to reject');
+      },
+      (e: unknown) => e
     );
+    expect(err).toBeInstanceOf(SessionNotAuthenticatedError);
+    // The WAF-challenge guidance from the old local error class is
+    // load-bearing (CoStar gates homes.com through AWS WAF) — it now
+    // rides as a throw-site addendum on the shared error.
+    expect((err as Error).message).toContain('AWS WAF challenge interstitial');
+    expect((err as Error).message).toContain('complete the challenge');
   });
 
   it('fetchHtml does NOT false-positive on a normal page mentioning awswaf.com in a large body', async () => {
