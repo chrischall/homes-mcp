@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.3](https://github.com/chrischall/homes-mcp/compare/v1.0.2...v1.0.3) (2026-07-07)
+
+
+### Bug Fixes
+
+* bump @chrischall/mcp-utils to 0.12.0 (ReDoS + secret-redaction security fixes + detail hook / scrape subpath) ([#126](https://github.com/chrischall/homes-mcp/issues/126)) ([36c4f56](https://github.com/chrischall/homes-mcp/commit/36c4f56e5a7ff6af38a4e4d117b77ed0de4d74cb))
+
+
+### Refactor
+
+* shared SessionNotAuthenticatedError + readPortEnv ([#123](https://github.com/chrischall/homes-mcp/issues/123)) ([ac25542](https://github.com/chrischall/homes-mcp/commit/ac2554206c99e3c336ae48c3f124b7a1e2291e9d))
+
 ## [1.0.2](https://github.com/chrischall/homes-mcp/compare/v1.0.1...v1.0.2) (2026-06-15)
 
 
