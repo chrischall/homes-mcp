@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.0](https://github.com/chrischall/homes-mcp/compare/v1.0.3...v1.1.0) (2026-07-13)
+
+
+### Features
+
+* **skill:** add homes.com fpx access skill ([#131](https://github.com/chrischall/homes-mcp/issues/131)) ([64d8f9e](https://github.com/chrischall/homes-mcp/commit/64d8f9e5a24617377b2b736b7f58bbfbac4ed2eb))
+
+
+### Refactor
+
+* **skill:** move root SKILL.md into skills/, point plugin.json at ./skills/ ([#133](https://github.com/chrischall/homes-mcp/issues/133)) ([7f5a42f](https://github.com/chrischall/homes-mcp/commit/7f5a42fd4d9840abc6e114f692a907ce7d151c65))
+
 ## [1.0.3](https://github.com/chrischall/homes-mcp/compare/v1.0.2...v1.0.3) (2026-07-07)
 
 
