@@ -65,13 +65,9 @@ the edge):
 `"Atlanta, GA"` → `atlanta-ga`, a ZIP passes through as-is).
 
 ```sh
-fetch_jsonld 'https://www.homes.com/atlanta-ga/houses-for-sale/?price-min=300000&price-max=500000'
-```
-
-```sh
+fetch_jsonld 'https://www.homes.com/atlanta-ga/houses-for-sale/?price-min=300000&price-max=500000' > /tmp/jsonld.json
 jq -r '
-  .["@graph"][] | select(.["@type"][0]? == "CollectionPage" or .["@type"] == "CollectionPage")
-  | .mainEntity.numberOfItems as $total
+  .["@graph"][] | select(.["@type"] == "CollectionPage")
   | .mainEntity.itemListElement[]
   | [ (.url // .["@id"]),
       .mainEntity.address.streetAddress,
@@ -80,14 +76,7 @@ jq -r '
       .mainEntity.numberOfBathroomsTotal,
       .mainEntity.floorSize.value
     ] | @tsv
-' /tmp/homes-page.html 2>/dev/null || true
-# (pipe fetch_jsonld's stdout into a file first — see one-liner below)
-fetch_jsonld 'https://www.homes.com/atlanta-ga/houses-for-sale/' > /tmp/jsonld.json
-jq -r '.["@graph"][] | select(.["@type"]=="CollectionPage") |
-  .mainEntity.itemListElement[] |
-  [(.url // .["@id"]), .mainEntity.address.streetAddress, .offers.price,
-   .mainEntity.numberOfBedrooms, .mainEntity.numberOfBathroomsTotal,
-   .mainEntity.floorSize.value] | @tsv' /tmp/jsonld.json
+' /tmp/jsonld.json
 ```
 
 Property id = last non-empty path segment of `url` (strip `?query` /
