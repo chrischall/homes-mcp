@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/chrischall/homes-mcp/compare/v1.1.0...v1.1.1) (2026-07-19)
+
+
+### Documentation
+
+* replace duplicated fleet policy with a pointer ([#135](https://github.com/chrischall/homes-mcp/issues/135)) ([a3f46f9](https://github.com/chrischall/homes-mcp/commit/a3f46f968475cd89506a2b667f71b6a1597fd3f6))
+
 ## [1.1.0](https://github.com/chrischall/homes-mcp/compare/v1.0.3...v1.1.0) (2026-07-13)
 
 
