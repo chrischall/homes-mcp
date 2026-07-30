@@ -2,7 +2,7 @@
   "name": "homes-mcp",
   "version": "1.1.1",
   "mcpName": "io.github.chrischall/homes-mcp",
-  "description": "Homes MCP server for Claude — developed and maintained by AI (Claude Code)",
+  "description": "Homes MCP server for Claude \u2014 developed and maintained by AI (Claude Code)",
   "author": "Claude Code (AI) <https://www.anthropic.com/claude>",
   "repository": {
     "type": "git",
@@ -39,9 +39,9 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@chrischall/mcp-utils": "^0.13.0",
+    "@chrischall/mcp-utils": "^0.14.0",
     "@chrischall/realty-core": "^0.4.1",
-    "@fetchproxy/server": "^1.0.0",
+    "@fetchproxy/server": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "node-html-parser": "^9.0.0",
     "zod": "^4.4.3"
