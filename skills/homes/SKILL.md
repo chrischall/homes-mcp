@@ -1,5 +1,5 @@
 ---
-name: homes-mcp
+name: homes
 description: Look up real-estate listings, property details, price/tax history, market reports, saved homes, and photo galleries on homes.com via MCP. Triggers on phrases like "find homes on homes.com in", "homes.com property details for", "what does homes.com say about", "homes.com price history for", or any request involving homes.com properties, prices, history, or photos. Requires homes-mcp installed and the fetchproxy extension active (see Setup below).
 ---
 
