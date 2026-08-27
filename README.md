@@ -113,7 +113,7 @@ homes.com's pages are SSR React with no public JSON API — every tool extracts 
 ## Commands
 
 ```bash
-npm test               # vitest, mocked transport, no network
+npm test               # tsc typecheck + vitest, mocked transport, no network
 npm run test:watch
 npm run test:coverage
 npm run build          # tsc --noEmit + esbuild bundle → dist/bundle.js
