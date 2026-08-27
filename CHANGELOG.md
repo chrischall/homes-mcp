@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.4](https://github.com/chrischall/homes-mcp/compare/v1.1.3...v1.1.4) (2026-08-27)
+
+
+### Documentation
+
+* npm test now typechecks before running vitest ([#166](https://github.com/chrischall/homes-mcp/issues/166)) ([f912c46](https://github.com/chrischall/homes-mcp/commit/f912c465b4435cae41beb0ba5a6d822a8ff1db01))
+* **readme:** npm test now typechecks before running vitest ([#168](https://github.com/chrischall/homes-mcp/issues/168)) ([acca8bd](https://github.com/chrischall/homes-mcp/commit/acca8bd4dfe4ec5fc92244ea6ef41740355bb881))
+* **skill:** declare the name this skill actually publishes under ([#162](https://github.com/chrischall/homes-mcp/issues/162)) ([73d1fcf](https://github.com/chrischall/homes-mcp/commit/73d1fcf63f56b5861cb926d82d4d53f185cbcbf7))
+
 ## [1.1.3](https://github.com/chrischall/homes-mcp/compare/v1.1.2...v1.1.3) (2026-08-06)
 
 
