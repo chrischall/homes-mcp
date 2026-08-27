@@ -109,9 +109,9 @@ Each `tools/*.ts` file exports `registerXxxTools(server, client)` (or `(server)`
 
 ```bash
 npm run build          # tsc --noEmit + esbuild bundle → dist/bundle.js
-npm test               # vitest, mocked transport, no network
+npm test               # tsc typecheck + vitest, mocked transport, no network
 npm run test:watch
-npm run test:coverage  # v8 coverage, no thresholds
+npm run test:coverage  # tsc typecheck + v8 coverage, no thresholds
 npx tsc --noEmit       # typecheck only
 node dist/bundle.js    # launch the MCP server over stdio (also opens WS)
 ```
