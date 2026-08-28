@@ -24,8 +24,16 @@ state:
     start mints a fresh identity and re-prompts pairing in the browser; the
     API refuses bridge without it.
 egress:
-  allow:
-    # Only hosts the SERVER process actually fetches. Hosts that appear
-    # solely in a URL this server BUILDS and returns are excluded.
-    - homes.com
-    - www.homes.com
+  # Only hosts the SERVER process actually fetches. Hosts that appear
+  # solely in a URL this server BUILDS and returns are excluded.
+  #
+  # This server has ONE mode, the browser bridge: every request goes
+  # through FetchproxyTransport (src/transport-fetchproxy.ts) to the
+  # user's signed-in tab, which is what dials www.homes.com. The process
+  # itself opens only the loopback concentrator port the runner's agent
+  # connects to — there is no direct/bootstrap/anonymous path, no env
+  # flag that bypasses the bridge, and no `fetch(` outside the transport.
+  # So `homes.com` / `www.homes.com` are hosts the BROWSER fetches, not
+  # this process, and listing them would admit dials this server never
+  # makes. No runtime-discovered hosts.
+  allow: []
