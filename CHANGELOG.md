@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.5](https://github.com/chrischall/homes-mcp/compare/v1.1.4...v1.1.5) (2026-08-28)
+
+
+### Bug Fixes
+
+* **egress:** declare only the hosts the server process dials in mint.yaml ([#169](https://github.com/chrischall/homes-mcp/issues/169)) ([cd40ebe](https://github.com/chrischall/homes-mcp/commit/cd40ebee3dcbba2c1b4dc0ae6baea8046b5edb6a))
+
 ## [1.1.4](https://github.com/chrischall/homes-mcp/compare/v1.1.3...v1.1.4) (2026-08-27)
 
 
