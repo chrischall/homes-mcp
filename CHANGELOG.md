@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/chrischall/homes-mcp/compare/v1.1.5...v1.2.0) (2026-08-29)
+
+
+### Features
+
+* **deps:** take @fetchproxy/server 2.2.0 so the concentrator can bind its sandbox address ([#171](https://github.com/chrischall/homes-mcp/issues/171)) ([e5de706](https://github.com/chrischall/homes-mcp/commit/e5de706f56beda9bdc131dba9aaf3f600f4c0ee0))
+
 ## [1.1.5](https://github.com/chrischall/homes-mcp/compare/v1.1.4...v1.1.5) (2026-08-28)
 
 
