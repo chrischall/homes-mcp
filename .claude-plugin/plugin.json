@@ -1,7 +1,7 @@
 {
   "name": "homes-mcp",
   "displayName": "homes.com",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "description": "homes.com real-estate access for Claude — search listings, get property details, photos, compare properties, mortgage + affordability math",
   "author": {
     "name": "Chris Hall",
