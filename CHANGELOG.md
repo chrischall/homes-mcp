@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/chrischall/homes-mcp/compare/v1.2.0...v1.3.0) (2026-09-02)
+
+
+### Features
+
+* **healthcheck:** adopt the shared bridge healthcheck and report the extension link state ([#185](https://github.com/chrischall/homes-mcp/issues/185)) ([c33742c](https://github.com/chrischall/homes-mcp/commit/c33742c5eccbebdd651fa166f7cd237b649999d8))
+
+
+### Documentation
+
+* **healthcheck:** state the not_listening exemption in the timeout re-kind rule ([#189](https://github.com/chrischall/homes-mcp/issues/189)) ([7710024](https://github.com/chrischall/homes-mcp/commit/7710024f406e782d1d8cb8fb7a68fc7781504cc0))
+* **mint:** declare HOMES_COMMUNITIES_FILE in mint.yaml ([#180](https://github.com/chrischall/homes-mcp/issues/180)) ([f12edc5](https://github.com/chrischall/homes-mcp/commit/f12edc50c0419732e15340185c284c900c88a6ad))
+
 ## [1.2.0](https://github.com/chrischall/homes-mcp/compare/v1.1.5...v1.2.0) (2026-08-29)
 
 
