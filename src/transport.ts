@@ -13,7 +13,10 @@
 // @fetchproxy/server 0.10.0 (`runProbe`); re-export its result shape so
 // the healthcheck tool can type the projection without reaching into the
 // dep directly.
-import type { BridgeProbeResult } from '@chrischall/mcp-utils/fetchproxy';
+import type {
+  BridgeHealth,
+  BridgeProbeResult,
+} from '@chrischall/mcp-utils/fetchproxy';
 export type { BridgeProbeResult };
 
 export interface FetchInit {
@@ -45,34 +48,17 @@ export interface JsonRequestInit {
   body?: unknown;
 }
 
-/** Diagnostic snapshot returned by `HomesTransport.status()`. */
-export interface BridgeStatus {
-  /** Role the underlying server elected (host vs peer). `null` until `start()` resolves. */
-  role: 'host' | 'peer' | null;
-  /** The WebSocket port. Hosts bind it; peers tunnel through it. */
-  port: number;
-  /** MCP server version announced to the extension. */
-  serverVersion: string;
-  /** Default per-request timeout in ms. */
-  fetchTimeoutMs: number;
-  /** Unix-ms timestamp of the last successful round-trip. `null` until the first success. */
-  lastSuccessAt: number | null;
-  /** Unix-ms timestamp of the last failed round-trip. `null` until the first failure. */
-  lastFailureAt: number | null;
-  /** Short message describing the most recent failure. `null` until the first failure. */
-  lastFailureReason: string | null;
-  /** Number of failures since the last success (or since process start, if none). */
-  consecutiveFailures: number;
-  /**
-   * 0.8.0+: wall-clock timestamp (Unix ms) of the most recent inner
-   * frame received from the fetchproxy extension — regardless of
-   * whether that frame was a success or error for the calling MCP.
-   * Distinct from `lastSuccessAt`/`lastFailureAt`, which track
-   * *user-visible* fetch outcomes. This is "is the extension still
-   * answering?" liveness. `null` until the first frame arrives.
-   */
-  lastExtensionMessageAt: number | null;
-}
+/**
+ * Diagnostic snapshot returned by `HomesTransport.status()`.
+ *
+ * This is @fetchproxy/server's `bridgeHealth()` shape verbatim (role, port,
+ * freshness counters, `lastExtensionMessageAt`, and — 2.5.0+ — the
+ * `session` extension-link block: `state` / `pairCode` /
+ * `extensionConnected`). The shared `registerBridgeHealthcheckTool` in
+ * @chrischall/mcp-utils consumes exactly this type, so aliasing rather than
+ * re-declaring a local subset keeps homes from drifting behind new fields.
+ */
+export type BridgeStatus = BridgeHealth;
 
 export interface HomesTransport {
   /** Bring the transport up. Idempotent. */

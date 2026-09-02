@@ -18,7 +18,7 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_compare_properties` | `tools/compare.ts` | Concurrent `get_property` calls across N targets | read |
 | `homes_calculate_mortgage` | `tools/mortgage.ts` | (local; no network) | read |
 | `homes_calculate_affordability` | `tools/affordability.ts` | (local; no network) | read |
-| `homes_healthcheck` | `tools/healthcheck.ts` | `/robots.txt` round-trip + bridge diagnostics | read |
+| `homes_healthcheck` | `tools/healthcheck.ts` | `/robots.txt` round-trip + bridge diagnostics via the shared `registerBridgeHealthcheckTool` (`@chrischall/mcp-utils/fetchproxy`); reports the 2.5.0 extension-link state (`bridge.session_state` / `pending_pair_code` / `extension_connected`) and `error.kind` incl. `session_not_ready` — a probe timeout while `session_state` is not `linked` is re-kinded to `session_not_ready`, because the 18s probe deadline fires before fetchproxy's 30s session-ready wait and would otherwise report a pending pair code as a tab timeout | read |
 | `homes_get_property_history` | `tools/history.ts` | Same SSR detail page — parse Property/Purchase/Mortgage History tables | read |
 | `homes_get_tax_history` | `tools/history.ts` | Same SSR detail page — parse Tax History table | read |
 | `homes_get_nearby_listings` | `tools/nearby.ts` | Same SSR detail page — scrape "Homes for Sale Near" link cards | read |
@@ -74,7 +74,10 @@ src/
     compare.ts          # homes_compare_properties (concurrent get_property)
     mortgage.ts         # homes_calculate_mortgage (local PITI)
     affordability.ts    # homes_calculate_affordability (local DTI math)
-    healthcheck.ts      # homes_healthcheck (round-trips /robots.txt)
+    healthcheck.ts      # homes_healthcheck — the shared registerBridgeHealthcheckTool
+                        #   from @chrischall/mcp-utils/fetchproxy over a {runProbe,
+                        #   status} shim on the client; homes keeps the 18s probe
+                        #   deadline (probeFn) + the homes.com/WAF hint copy
     history.ts          # homes_get_property_history + homes_get_tax_history
                         #   (scrape Property/Purchase/Mortgage/Tax tables)
     nearby.ts           # homes_get_nearby_listings (scrape "Homes for

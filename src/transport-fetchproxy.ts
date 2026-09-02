@@ -50,6 +50,7 @@ export {
   FetchproxyTimeoutError,
   FetchproxyProtocolError,
   FetchproxyHttpError,
+  FetchproxySessionNotReadyError,
   classifyBridgeError,
   type BridgeError,
 } from '@chrischall/mcp-utils/fetchproxy';
