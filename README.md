@@ -29,7 +29,7 @@ homes.com real-estate access as an MCP server for Claude — search listings, re
 | `homes_calculate_affordability` | Local affordability calculator — max purchase price from income + DTI + rates. No network. |
 | `homes_calculate_mortgage` | Local PITI calculator — principal+interest, taxes, insurance, HOA, PMI. No network. |
 | `homes_estimate_rent_vs_buy` | Local rent-vs-buy model — you supply `monthly_rent` (homes.com has no rental signal to impute it; see below). No network. |
-| `homes_healthcheck` | Round-trips `/robots.txt` through the fetchproxy bridge and returns diagnostics + a plain-English hint distinguishing "bridge down" from "extension not connected" from "homes.com-side problem." |
+| `homes_healthcheck` | Round-trips `/robots.txt` through the fetchproxy bridge (the shared `registerBridgeHealthcheckTool` from `@chrischall/mcp-utils/fetchproxy`) and returns diagnostics: bridge role/port/version, the extension link state (`bridge.session_state`, `pending_pair_code`, `extension_connected`), a classified `error.kind` (`timeout` / `bridge_down` / `session_not_ready` / `protocol` / `unknown`), and a plain-English hint distinguishing "bridge down" from "extension not connected / pair code pending" from "homes.com-side problem." |
 | `homes_get_session_context` / `homes_register_session` / `homes_set_active_session` | List / register / switch logical homes.com sessions. |
 
 ### Known data gap: rental estimates

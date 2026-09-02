@@ -73,7 +73,7 @@ That's it. No API keys, no env vars. (Sign-in isn't strictly required for the pu
 
 ### Diagnostics & sessions
 
-- **`homes_healthcheck`** — Round-trips `/robots.txt` through the fetchproxy bridge; distinguishes "bridge down" vs "extension not connected" vs "homes.com-side problem."
+- **`homes_healthcheck`** — Round-trips `/robots.txt` through the fetchproxy bridge; distinguishes "bridge down" vs "extension not connected / pair code pending" (`bridge.session_state`, `error.kind: session_not_ready`) vs "homes.com-side problem."
 - **`homes_get_session_context`**, **`homes_register_session`**, **`homes_set_active_session`** — List / register / switch logical homes.com sessions.
 
 ## Trigger examples
