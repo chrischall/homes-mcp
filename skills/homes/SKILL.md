@@ -39,9 +39,12 @@ That's it. No API keys, no env vars. (Sign-in isn't strictly required for the pu
 
 ## Tools
 
+Five of these take an optional `view` and answer on the **compact** rung when
+you omit it — see [Response shape](#response-shape-view).
+
 ### Search & resolve
 
-- **`homes_search_properties`** — Search by free-text location (city, ZIP, neighborhood). Slugifies the input into homes.com's URL routing. Filters by `property_type`, `listing_type`, `sort`, and a `price_min`/`price_max` band (homes.com's `?price-min=`/`?price-max=` query facet). Returns each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage. Caps at the ~40-listing SSR page; sets `truncated`/`total_estimated` when the market has more.
+- **`homes_search_properties`** — Search by free-text location (city, ZIP, neighborhood). Slugifies the input into homes.com's URL routing. Filters by `property_type`, `listing_type`, `sort`, and a `price_min`/`price_max` band (homes.com's `?price-min=`/`?price-max=` query facet). Returns each listing's address, price, beds/baths, sqft, listing agent + brokerage — and, on `view: "full"`, `primary_photo_url` (the default compact rung strips it; see [Response shape](#response-shape-view)). Caps at the ~40-listing SSR page; sets `truncated`/`total_estimated` when the market has more.
 - **`homes_get_by_address`** — Resolve a single US street address to its canonical homes.com property URL + opaque property hash. Walks structured smartsearch typeahead → slug routing → city/zip search-fallback, verifying each candidate with a whole-token street + unit match. Returns `matched_via` and degrades gracefully to `{ resolved: false }`.
 - **`homes_resolve_addresses`** — Bulk version of `homes_get_by_address` (up to 100 addresses, input order preserved, per-row outcomes). Prefer for any batch ≥ 3.
 
@@ -75,6 +78,66 @@ That's it. No API keys, no env vars. (Sign-in isn't strictly required for the pu
 
 - **`homes_healthcheck`** — Round-trips `/robots.txt` through the fetchproxy bridge; distinguishes "bridge down" vs "extension not connected / pair code pending" (`bridge.session_state`, `error.kind: session_not_ready`) vs "homes.com-side problem."
 - **`homes_get_session_context`**, **`homes_register_session`**, **`homes_set_active_session`** — List / register / switch logical homes.com sessions.
+
+## Response shape (`view`)
+
+Five tools take `view: "compact" | "full"`, and **`compact` is the default** —
+you get the slim shape without asking for it: `homes_search_properties`,
+`homes_get_property`, `homes_bulk_get`, `homes_compare_properties`,
+`homes_get_market_report`.
+
+**Compact here is media stripping, not a field projection — do not expect a
+field list.** It removes image URLs and nothing else. These tools hand back
+what the page's JSON-LD said, close to verbatim, and this repo holds no
+verified record of which of homes.com's fields matter, so it does not claim to
+keep some and drop others: a listing that came back with holes in it would read
+exactly like a verified answer. Stripping is subtractive, so it cannot lose a
+field nobody knew about. Everything you act on survives — `property_id`, `url`,
+`price`, beds/baths/sqft, agent, `matterport_url` (a link to a PAGE you can
+open, not an image), the whole `description` byte-for-byte.
+
+**The two fields this actually costs you, both minted by this server:**
+
+- **`primary_photo_url`** — built by the formatter, not a homes.com field. It
+  is gone by default on all five, including every row of a `homes_bulk_get` or
+  `homes_compare_properties` fan-out and every entry of a market report's
+  `sample_sold`.
+- **`floorplan_urls`** — scraped out of the detail page's own `<img>` tags by
+  `homes_get_property`. Worth knowing that this one is dropped by NAME: it
+  holds an ARRAY, and the fleet's URL rule is tested against object values and
+  never against array elements, so before the key was named it was not
+  "sometimes kept" — it was never stripped at all.
+
+Pass `view: "full"` to get both back, with homes.com's payload otherwise
+untouched. There is deliberately **no `raw` rung**: nothing normalises the
+payload beyond the formatting these tools already do, so `full` already IS the
+untouched result and a third value would silently alias it.
+
+**`homes_get_property_photos` takes no `view`, and that is the important
+exclusion.** Its PRODUCT is the image. Compact there would not shrink the
+response, it would EMPTY it — `photos` is itself a media key, so the whole
+array vanishes while `count: 12` goes on claiming twelve. Never ask for a
+compact rung there and never expect one; the tool is tested to keep its URLs
+even if a stray `view` is passed.
+
+The other fifteen tools take no `view` because there is nothing in their output
+to strip:
+
+- `homes_get_saved_homes` / `homes_get_saved_searches` are card scrapes —
+  `{ property_id, url, address, price, beds, baths, sqft, status }` and
+  `{ name, url, filters }`, no images.
+- `homes_get_nearby_listings` returns URL + address only.
+- `homes_get_history`, `homes_get_property_history` and `homes_get_tax_history`
+  return event and tax rows.
+- `homes_get_by_address` and `homes_resolve_addresses` return a URL and a
+  verdict.
+- `homes_calculate_mortgage`, `homes_calculate_affordability` and
+  `homes_estimate_rent_vs_buy` are local arithmetic — no network, no payload.
+- `homes_healthcheck` and the three session tools return status.
+
+Passing `view` to any of them is not an error and not a warning: MCP tool
+schemas are non-strict, so the key is dropped and you get that tool's ordinary
+output.
 
 ## Trigger examples
 
