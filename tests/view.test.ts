@@ -66,6 +66,35 @@ describe('viewResponse', () => {
     });
   });
 
+  // `floorplan_urls` is the OTHER key this repo mints from the page's own <img>
+  // tags (scrapeExtras), and it is worse off than primary_photo_url: `floorplan`
+  // is not a media noun the fleet rule knows at all, prefix or no prefix. Same
+  // failure mode, same fix — asserted on an extension-less URL so the test
+  // cannot pass by accident the way a .jpg fixture would.
+  it('drops floorplan_urls, including on URLs with no image extension', () => {
+    const payload = {
+      property_id: 'aaa',
+      floorplan_urls: [
+        'https://images.homes.com/floorplan/abc-fp1.jpg',
+        'https://images.homes.com/floorplan?id=abc&plan=2',
+      ],
+      // A page link, not an image: a caller can open it, so it stays. This is
+      // the line between the two, and it is easy to erase by widening the rule.
+      matterport_url: 'https://my.matterport.com/show/?m=abc123',
+      price: 500000,
+    };
+    expect(parse(viewResponse(undefined, payload))).toEqual({
+      property_id: 'aaa',
+      matterport_url: 'https://my.matterport.com/show/?m=abc123',
+      price: 500000,
+    });
+  });
+
+  it('returns floorplan_urls under view: "full"', () => {
+    const payload = { floorplan_urls: ['https://images.homes.com/floorplan?id=abc'] };
+    expect(parse(viewResponse('full', payload))).toEqual(payload);
+  });
+
   // …and nested, since it rides on every row of a search / bulk / compare result
   // rather than at the top level.
   it('drops primary_photo_url on every row of a listing array', () => {
