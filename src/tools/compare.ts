@@ -7,7 +7,6 @@ import {
   retryOnceOnTimeout,
 } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
 import { viewArg, viewResponse } from '../view.js';
 import {
   fetchListingRecord,

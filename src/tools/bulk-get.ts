@@ -7,7 +7,7 @@ import {
   retryOnceOnTimeout,
 } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
+import { viewArg, viewResponse } from '../view.js';
 import {
   fetchListingRecord,
   format,
@@ -104,9 +104,10 @@ export function registerBulkGetTools(
           .describe(
             'When true, include the raw listing `description` marketing prose per-row. Default false.'
           ),
+        view: viewArg(),
       },
     },
-    async ({ urls, include_description }) => {
+    async ({ urls, include_description, view }) => {
       // #54 partial-results contract (D1), now via `runBoundedBatch`
       // (mcp-utils 0.8 — the slot-array + overall-deadline + pending-backfill
       // pattern hoisted out of the cohort's hand-rolled `runWithDeadline`,
@@ -168,7 +169,7 @@ export function registerBulkGetTools(
         results: BulkRow[];
       } = { count: rows.length, results: rows };
       if (pending > 0) envelope.pending = pending;
-      return minifiedResult(envelope);
+      return viewResponse(view, envelope);
     }
   );
 }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
+import { viewArg, viewResponse } from '../view.js';
 import { collectAddressAlternates } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { urlToPath } from '../url.js';
@@ -522,11 +522,13 @@ export function registerPropertyTools(
           .describe(
             'When true, inline `tax_history` records — same data `homes_get_tax_history` returns. Saves a second round trip when you need both (#27).'
           ),
+        view: viewArg(),
       },
     },
-    async ({ url, include_description, include_price_history, include_tax_history }) => {
+    async ({ url, include_description, include_price_history, include_tax_history, view }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
-      return minifiedResult(
+      return viewResponse(
+        view,
         format(listing, html, {
           includeDescription: include_description,
           includePriceHistory: include_price_history,

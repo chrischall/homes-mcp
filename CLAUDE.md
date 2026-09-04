@@ -48,7 +48,8 @@ src/
                         #   + sign-in detection (WAF challenge / /sign-in redirect)
   page-state.ts         # extractJsonLd + findGraphNode helpers
   url.ts                # urlToPath + locationToSlug
-  mcp.ts                # re-exports textResult() from @chrischall/mcp-utils
+  mcp.ts                # re-exports minifiedResult() from @chrischall/mcp-utils
+  view.ts               # the `view` rungs (compact default / full) + viewResponse()
   jsonld.ts             # Schema.org JSON-LD coercion helpers shared by the
                         #   search + detail extractors (toNumber, firstImage,
                         #   firstAgent, brokerageFrom, lastPathSegment)
@@ -135,7 +136,8 @@ HOMES_COMMUNITIES_FILE=…     # path to a JSON array of community names
 ## Conventions
 
 - All tools prefixed `homes_*`.
-- Tool return shape: `textResult(data)` from `src/mcp.ts` → `{ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }`. Don't hand-roll the wrapper.
+- Tool return shape: `minifiedResult(data)` from `src/mcp.ts` → `{ content: [{ type: 'text', text: JSON.stringify(data) }] }`. MINIFIED — never `null, 2`: indentation is roughly a fifth of a large response and nothing downstream reads it. Whitespace *inside* a value is untouched, because `JSON.stringify` drops only the indent. Don't hand-roll the wrapper.
+- A read tool that returns scraped homes.com content takes `view: viewArg()` and answers through `viewResponse(view, payload)` (`src/view.ts`), default `compact`. Two exceptions, both deliberate: a tool whose PRODUCT is the image (`homes_get_property_photos` — compact would empty it, not shrink it), and a pure calculator with no upstream payload (`homes_calculate_mortgage`, `homes_calculate_affordability`, `homes_estimate_rent_vs_buy`), which returns `minifiedResult` directly.
 - Tool annotations: every tool sets `title`, `readOnlyHint: true`, `idempotentHint: true`, and `openWorldHint`. The last is `true` for network-bound tools and `false` for `homes_calculate_mortgage` / `homes_calculate_affordability` (pure local computation).
 - Path-only inputs to `HomesClient`: pass `/some/path?with=query`, never a full URL. `FetchproxyTransport` prepends `https://www.homes.com`. When a tool takes a `url` arg from the user, reduce it via `urlToPath` from `src/url.ts`.
 - Write a failing test before implementation (TDD).
