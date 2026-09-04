@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { calculateMortgage } from '@chrischall/realty-core';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 
 /**
  * Local-only mortgage / PITI calculator. No network — fully
@@ -55,7 +55,7 @@ export function registerMortgageTools(server: McpServer): void {
       // percent), and the `monthly_total_piti` / `total_interest_over_term`
       // field names. `interest_rate` / `total_paid_over_loan` are dropped
       // (homes-mcp never surfaced them).
-      return textResult({
+      return minifiedResult({
         home_price: m.home_price,
         down_payment: m.down_payment,
         loan_amount: m.loan_amount,

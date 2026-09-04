@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { viewArg, viewResponse } from '../view.js';
 import { extractJsonLd } from '../page-state.js';
 import { findListings, formatHome, type FormattedHome } from './search.js';
 import { locationToSlug } from '../url.js';
@@ -63,9 +63,10 @@ export function registerMarketTools(
         location: z
           .string()
           .describe('Free-text location: city, ZIP, neighborhood'),
+        view: viewArg(),
       },
     },
-    async ({ location }) => {
+    async ({ location, view }) => {
       const slug = locationToSlug(location);
       const path = `/${slug}/sold/`;
       const html = await client.fetchHtml(path);
@@ -74,7 +75,7 @@ export function registerMarketTools(
       const sample = items
         .map(formatHome)
         .filter((h): h is FormattedHome => h !== null);
-      return textResult({
+      return viewResponse(view, {
         region: location,
         slug,
         sold_summary: computeMarketSummary(sample),

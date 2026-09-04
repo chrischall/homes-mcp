@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import {
   parseHtml,
   parsePropertyTable,
@@ -243,7 +243,7 @@ export function registerHistoryTools(
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const listing_events = parsePropertyHistory(root);
-      return textResult({
+      return minifiedResult({
         property_id: extractPropertyIdFromHtml(html, url),
         url,
         listing_events,
@@ -274,7 +274,7 @@ export function registerHistoryTools(
       const path = urlToPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
-      return textResult({
+      return minifiedResult({
         property_id: extractPropertyIdFromHtml(html, url),
         url,
         records: parseTaxHistory(root),
@@ -306,7 +306,7 @@ export function registerHistoryTools(
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const listing_events = parsePropertyHistory(root);
-      return textResult({
+      return minifiedResult({
         property_id: extractPropertyIdFromHtml(html, url),
         url,
         listing_events,

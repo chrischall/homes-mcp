@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { viewArg, viewResponse } from '../view.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
 import {
@@ -374,6 +374,7 @@ export function registerSearchTools(
         openWorldHint: true,
       },
       inputSchema: {
+        view: viewArg(),
         location: z
           .string()
           .describe(
@@ -426,7 +427,13 @@ export function registerSearchTools(
           ),
       },
     },
-    async (input) => {
+    // `view` is destructured OFF the input before anything else sees it. It is a
+    // response-shape knob, not a search facet, and `buildSearchPath` takes the
+    // rest object — so a future field added to the schema reaches the URL builder
+    // while `view` structurally cannot. (The earlier `input as { view?: string }`
+    // cast left `view` sitting in the object handed to buildSearchPath; that
+    // builder reads named fields so nothing leaked, but the next one might not.)
+    async ({ view, ...input }) => {
       validatePriceBand(input);
       const path = buildSearchPath(input);
       const html = await client.fetchHtml(path);
@@ -471,7 +478,7 @@ export function registerSearchTools(
       if (truncated && typeof total === 'number') {
         payload.total_estimated = total;
       }
-      return textResult(payload);
+      return viewResponse(view, payload);
     }
   );
 }

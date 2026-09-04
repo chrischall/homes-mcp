@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import {
   parseHtml,
   parseDollar,
@@ -147,7 +147,7 @@ export function registerSavedTools(
       const html = await client.fetchHtml('/customer/dashboard/favorites/');
       const root = parseHtml(html);
       const homes = parseSavedHomes(root);
-      return textResult({ count: homes.length, homes });
+      return minifiedResult({ count: homes.length, homes });
     }
   );
 
@@ -169,7 +169,7 @@ export function registerSavedTools(
       const html = await client.fetchHtml('/customer/dashboard/saved-searches/');
       const root = parseHtml(html);
       const searches = parseSavedSearches(root);
-      return textResult({ count: searches.length, searches });
+      return minifiedResult({ count: searches.length, searches });
     }
   );
 }
