@@ -7,7 +7,7 @@ import {
   withDeadline,
 } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import {
   resolveOneAddress,
   type ByAddressInput,
@@ -219,7 +219,7 @@ export function registerResolveAddressesTools(
 
       await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
 
-      return textResult({
+      return minifiedResult({
         count: rows.length,
         results: rows,
       });

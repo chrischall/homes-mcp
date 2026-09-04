@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import { extractJsonLd } from '../page-state.js';
 import { findListings, formatHome, type FormattedHome } from './search.js';
 import { locationToSlug } from '../url.js';
@@ -74,7 +74,7 @@ export function registerMarketTools(
       const sample = items
         .map(formatHome)
         .filter((h): h is FormattedHome => h !== null);
-      return textResult({
+      return minifiedResult({
         region: location,
         slug,
         sold_summary: computeMarketSummary(sample),

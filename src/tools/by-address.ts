@@ -7,7 +7,7 @@ import {
 } from '@chrischall/mcp-utils/fetchproxy';
 import { addressMatch } from '@chrischall/realty-core';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
 import {
@@ -626,6 +626,6 @@ export function registerByAddressTools(
       // homes.com fetch returns a clean { resolved: false, error:
       // 'timeout' } instead of wedging the connection until the client
       // tears it down with a -32001.
-      textResult(await resolveOneAddressDeadlined(client, input))
+      minifiedResult(await resolveOneAddressDeadlined(client, input))
   );
 }

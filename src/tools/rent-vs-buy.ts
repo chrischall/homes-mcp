@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 
 /**
  * Local-only rent-vs-buy projection. Same input/output contract as
@@ -208,6 +208,6 @@ export function registerRentVsBuyTools(server: McpServer): void {
         investment_return_rate: z.number().nonnegative().optional(),
       },
     },
-    async (i) => textResult(estimateRentVsBuy(i as RentVsBuyInput))
+    async (i) => minifiedResult(estimateRentVsBuy(i as RentVsBuyInput))
   );
 }

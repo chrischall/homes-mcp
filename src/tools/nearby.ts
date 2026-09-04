@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import { parseHtml, type HTMLElement } from '../html.js';
 import { urlToPath } from '../url.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
@@ -143,7 +143,7 @@ export function registerNearbyTools(
       const root = parseHtml(html);
       const all = parseNearbyListings(root, { include_rentals });
       const listings = limit !== undefined ? all.slice(0, limit) : all;
-      return textResult({
+      return minifiedResult({
         property_id: originPropertyId(html, url),
         url,
         count: listings.length,

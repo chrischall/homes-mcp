@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { extractImgTags } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import { lastPathSegment } from '../jsonld.js';
 import { fetchListingRecord } from './properties.js';
 
@@ -100,7 +100,7 @@ export function registerPhotosTools(
       // Prefer listing.url over listing['@id'] (homes.com @id now has a
       // #realestatelisting fragment). `lastPathSegment` strips the
       // #fragment and ?query before taking the last path segment.
-      return textResult({
+      return minifiedResult({
         property_id: lastPathSegment(listing.url ?? listing['@id'] ?? ''),
         url: listing.url ?? listing['@id'] ?? '',
         count: photos.length,

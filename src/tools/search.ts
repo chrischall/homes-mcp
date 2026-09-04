@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
+import { viewArg, viewResponse } from '../view.js';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { locationToSlug } from '../url.js';
 import {
@@ -374,6 +375,7 @@ export function registerSearchTools(
         openWorldHint: true,
       },
       inputSchema: {
+        view: viewArg(),
         location: z
           .string()
           .describe(
@@ -471,7 +473,7 @@ export function registerSearchTools(
       if (truncated && typeof total === 'number') {
         payload.total_estimated = total;
       }
-      return textResult(payload);
+      return viewResponse((input as { view?: string }).view, payload);
     }
   );
 }

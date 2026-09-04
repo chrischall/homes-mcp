@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import { collectAddressAlternates } from '@chrischall/realty-core';
 import { extractJsonLd, findGraphNode } from '../page-state.js';
 import { urlToPath } from '../url.js';
@@ -526,7 +526,7 @@ export function registerPropertyTools(
     },
     async ({ url, include_description, include_price_history, include_tax_history }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
-      return textResult(
+      return minifiedResult(
         format(listing, html, {
           includeDescription: include_description,
           includePriceHistory: include_price_history,

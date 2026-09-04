@@ -7,7 +7,8 @@ import {
   retryOnceOnTimeout,
 } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
+import { viewArg, viewResponse } from '../view.js';
 import {
   fetchListingRecord,
   format,
@@ -88,6 +89,7 @@ export function registerCompareTools(
         openWorldHint: true,
       },
       inputSchema: {
+        view: viewArg(),
         targets: z
           .array(
             z
@@ -119,7 +121,7 @@ export function registerCompareTools(
           ),
       },
     },
-    async ({ targets, include_description, include_summary }) => {
+    async ({ targets, include_description, include_summary, view }) => {
       const ts = targets as CompareTarget[];
       // See bulk-get.ts header for the round-3 #78 rationale on
       // BRIDGE_CONCURRENCY + retryOnceOnTimeout + classifyRowError.
@@ -161,7 +163,7 @@ export function registerCompareTools(
       if (include_summary) {
         payload.summary = buildSummary(rows);
       }
-      return textResult(payload);
+      return viewResponse(view, payload);
     }
   );
 }

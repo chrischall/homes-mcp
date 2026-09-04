@@ -7,7 +7,7 @@ import {
   retryOnceOnTimeout,
 } from '@chrischall/mcp-utils/fetchproxy';
 import type { HomesClient } from '../client.js';
-import { textResult } from '../mcp.js';
+import { minifiedResult } from '../mcp.js';
 import {
   fetchListingRecord,
   format,
@@ -168,7 +168,7 @@ export function registerBulkGetTools(
         results: BulkRow[];
       } = { count: rows.length, results: rows };
       if (pending > 0) envelope.pending = pending;
-      return textResult(envelope);
+      return minifiedResult(envelope);
     }
   );
 }
