@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/chrischall/homes-mcp/compare/v1.3.0...v1.4.0) (2026-09-04)
+
+
+### Features
+
+* **tools:** compact by default — strip media URLs, and minify every response ([#190](https://github.com/chrischall/homes-mcp/issues/190)) ([b2146c1](https://github.com/chrischall/homes-mcp/commit/b2146c19afff4e8e11a5c2ce372c0f90a8f8d7c7))
+
+
+### Bug Fixes
+
+* **deps:** pick up @chrischall/mcp-utils 0.23.2 ([#194](https://github.com/chrischall/homes-mcp/issues/194)) ([c16b54a](https://github.com/chrischall/homes-mcp/commit/c16b54a0104f4b4230633d408f3bff4d978da063))
+* **tools:** strip floorplan_urls in compact, which never fired at all ([#193](https://github.com/chrischall/homes-mcp/issues/193)) ([4ff81ed](https://github.com/chrischall/homes-mcp/commit/4ff81ed0390366c76e7d0ea442784c3ec25f31f7))
+
 ## [1.3.0](https://github.com/chrischall/homes-mcp/compare/v1.2.0...v1.3.0) (2026-09-02)
 
 
