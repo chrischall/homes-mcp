@@ -399,15 +399,34 @@ describe('homes_get_property — richer fields', () => {
     expect(p.matterport_url).toContain('matterport.com');
   });
 
+  // This case is about the SCRAPER — that scrapeExtras finds floorplan <img>
+  // tags — so it asks for `view: 'full'`. The default rung now drops
+  // `floorplan_urls` (they are image URLs a model cannot see; see src/view.ts's
+  // DROP list), and reading extraction coverage off the compact rung would mean
+  // this test silently stopped checking extraction the moment that landed.
   it('extracts floorplan_urls', async () => {
+    fetch.mockResolvedValueOnce(RICH_FIXTURE);
+    const p = parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
+        view: 'full',
+      })
+    );
+    expect(p.floorplan_urls).toHaveLength(2);
+    expect(p.floorplan_urls[0]).toContain('floorplan');
+  });
+
+  // …and the default rung really does hide them, on the same fixture.
+  it('drops floorplan_urls on the default (compact) rung', async () => {
     fetch.mockResolvedValueOnce(RICH_FIXTURE);
     const p = parseToolResult<any>(
       await h.callTool('homes_get_property', {
         url: 'https://www.homes.com/property/test-st-atlanta-ga/abc123/',
       })
     );
-    expect(p.floorplan_urls).toHaveLength(2);
-    expect(p.floorplan_urls[0]).toContain('floorplan');
+    expect(p).not.toHaveProperty('floorplan_urls');
+    // Not a blanket strip: the Matterport tour is a page a caller can open.
+    expect(p.matterport_url).toContain('matterport.com');
   });
 
   it('extracts schools', async () => {

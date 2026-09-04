@@ -33,21 +33,36 @@ export const viewArg = (): ReturnType<typeof viewParam> => viewParam(HM_VIEWS, {
 /**
  * Keys THIS repo mints, which the fleet's media rule cannot be expected to know.
  *
- * `primary_photo_url` is not a homes.com field — `formatHome` / `format`
- * construct it, so naming it here needs no knowledge of the upstream payload
- * and none of the risk a guessed field list carries. It is here because the
- * fleet's `MEDIA_KEY` is anchored at the START of the key (deliberately: that
- * anchor is what keeps `hasThumbnail: false` alive), so a key PREFIXED with
- * something — `primary_photo_url` — does not match it.
+ * Neither entry is a homes.com field: `formatHome` / `format` construct
+ * `primary_photo_url`, and `scrapeExtras` builds `floorplan_urls` out of the
+ * page's own `<img>` tags. Naming keys this repo MINTS needs no knowledge of
+ * the upstream payload and carries none of the risk a guessed field list does.
  *
- * Without this rule the field was stripped only when its VALUE happened to end
- * in an image extension, via `MEDIA_URL`. That is true of every URL in this
- * repo's fixtures, so every test would have passed — and false the day
- * homes.com serves an extension-less CDN URL, at which point the tool would
- * quietly stop honouring the one thing its `view` note promises. A rule that
- * holds because of what the data looks like today is not a rule.
+ * They are here because the fleet's `MEDIA_KEY` is anchored at the START of the
+ * key (deliberately: that anchor is what keeps `hasThumbnail: false` alive), so
+ * a PREFIXED key does not match — and `floorplan` is not a media noun the rule
+ * knows at all.
+ *
+ * What each key falls back to without its rule is DIFFERENT, and the weaker
+ * case is the one that looks fine:
+ *
+ * - `primary_photo_url` holds a string, so `MEDIA_URL` catches it — but only
+ *   when the value ends in an image extension. True of every URL in this repo's
+ *   fixtures, so every test would have passed, and false the day homes.com
+ *   serves an extension-less CDN URL.
+ * - `floorplan_urls` holds an ARRAY, and `MEDIA_URL` is tested against object
+ *   values, never against array ELEMENTS. So it was not "sometimes kept" — it
+ *   was never stripped at all, `.jpg` and all. Naming the key is the only thing
+ *   that reaches it.
+ *
+ * A rule that holds because of what the data looks like today is not a rule,
+ * and one that never fired is not a rule either.
+ *
+ * The bar for adding an entry: this repo mints the key, and its value is an
+ * image a model cannot see. `matterport_url` fails the second half — it is a
+ * link to a PAGE, and a caller can act on it — so it stays.
  */
-const DROP = ['primary_photo_url'] as const;
+const DROP = ['primary_photo_url', 'floorplan_urls'] as const;
 
 /**
  * Answer in the requested rung.

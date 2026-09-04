@@ -25,6 +25,9 @@ afterAll(async () => {
 });
 
 const PHOTO = 'https://images.homes.com/listing/aaa/primary.jpg';
+// Extension-less on purpose: MEDIA_URL cannot help here, so this only
+// disappears because src/view.ts names the key in DROP.
+const FLOORPLAN = 'https://images.homes.com/floorplan?id=aaa&plan=1';
 const DESCRIPTION = 'Charming ranch.\n\n  Updated kitchen.\n\tNew roof 2024.\n\nMotivated seller.';
 
 /** A single property-detail page carrying a photo and a multi-paragraph blurb. */
@@ -53,7 +56,13 @@ function detailHtml(id = 'aaa'): string {
       },
     ],
   };
-  return `<html><script type="application/ld+json">${JSON.stringify(doc)}</script></html>`;
+  // Real floorplan <img> tags: scrapeExtras picks these up by the "floorplan"
+  // substring in the src, which is how floorplan_urls comes to exist at all.
+  return (
+    `<html><script type="application/ld+json">${JSON.stringify(doc)}</script>` +
+    `<img src="${FLOORPLAN}" alt="Floorplan 1">` +
+    `</html>`
+  );
 }
 
 /** A search / sold collection page carrying one listing with a photo. */
@@ -183,6 +192,22 @@ describe('view wiring — homes_get_property', () => {
       view: 'full',
     });
     expect(photoUrls(parseToolResult(r))).toEqual([PHOTO]);
+  });
+
+  // floorplan_urls is scraped from the page's <img> tags rather than the JSON-LD,
+  // so it reaches the response by a different route than primary_photo_url and
+  // needs its own assertion at the tool boundary — not just in the view unit test.
+  it('strips floorplan_urls by default and returns them under view: "full"', async () => {
+    mockFetchHtml.mockResolvedValueOnce(detailHtml());
+    const bare = await harness.callTool('homes_get_property', { url: '/property/x/aaa/' });
+    expect(parseToolResult<Record<string, unknown>>(bare)).not.toHaveProperty('floorplan_urls');
+
+    mockFetchHtml.mockResolvedValueOnce(detailHtml());
+    const full = await harness.callTool('homes_get_property', {
+      url: '/property/x/aaa/',
+      view: 'full',
+    });
+    expect(parseToolResult<{ floorplan_urls: string[] }>(full).floorplan_urls).toEqual([FLOORPLAN]);
   });
 
   // Minifying drops FORMATTING whitespace only. A listing description is the
