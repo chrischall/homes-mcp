@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/chrischall/homes-mcp/compare/v1.4.0...v1.4.1) (2026-09-04)
+
+
+### Documentation
+
+* **skill:** document the `view` response shape ([#195](https://github.com/chrischall/homes-mcp/issues/195)) ([ef50ed6](https://github.com/chrischall/homes-mcp/commit/ef50ed6c652c9045bfdcda094c38dadb8ae17bfc))
+
 ## [1.4.0](https://github.com/chrischall/homes-mcp/compare/v1.3.0...v1.4.0) (2026-09-04)
 
 

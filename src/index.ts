@@ -33,7 +33,7 @@ import { registerSessionsTools } from './tools/sessions.js';
 import { registerBulkGetTools } from './tools/bulk-get.js';
 import { registerResolveAddressesTools } from './tools/resolve-addresses.js';
 
-const VERSION = '1.4.0'; // x-release-please-version
+const VERSION = '1.4.1'; // x-release-please-version
 
 // Shared strict port parser: integer 1–65535 or the fetchproxy default
 // (37149) on anything unset/unparseable.
