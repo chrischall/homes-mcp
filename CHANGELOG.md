@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.2](https://github.com/chrischall/homes-mcp/compare/v1.4.1...v1.4.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* **deps:** bump hono from 4.13.0 to 4.13.7 ([#206](https://github.com/chrischall/homes-mcp/issues/206)) ([ec5f4af](https://github.com/chrischall/homes-mcp/commit/ec5f4afc2e0b79367a1bfce0c42cd9959e1af4f9))
+* **deps:** require @fetchproxy/server ^2.7.0, the first that reads FETCHPROXY_IDENTITY_DIR ([#204](https://github.com/chrischall/homes-mcp/issues/204)) ([978b8e9](https://github.com/chrischall/homes-mcp/commit/978b8e90ebcd5c96ed8460d4201a5aaa3c2e9d40))
+
 ## [1.4.1](https://github.com/chrischall/homes-mcp/compare/v1.4.0...v1.4.1) (2026-09-04)
 
 
