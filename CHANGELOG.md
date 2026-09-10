@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.3](https://github.com/chrischall/homes-mcp/compare/v1.4.2...v1.4.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 2.10.0 and @chrischall/mcp-utils 0.26.1 ([#209](https://github.com/chrischall/homes-mcp/issues/209)) ([e8ba59c](https://github.com/chrischall/homes-mcp/commit/e8ba59c7dc3736d6d566ee28fc30e2f8e2248cc5))
+* **deps:** declare the peer floors mcp-utils 0.26.1 requires ([#211](https://github.com/chrischall/homes-mcp/issues/211)) ([862e245](https://github.com/chrischall/homes-mcp/commit/862e2455c719229973fbe0f0b35bc7a06c663fee)), closes [#210](https://github.com/chrischall/homes-mcp/issues/210)
+* **deps:** take @fetchproxy/server 2.9.1 so a pairing prompt survives ([#207](https://github.com/chrischall/homes-mcp/issues/207)) ([4921655](https://github.com/chrischall/homes-mcp/commit/492165566cb2b30a89b4701efa7a47b23eb64313))
+
 ## [1.4.2](https://github.com/chrischall/homes-mcp/compare/v1.4.1...v1.4.2) (2026-09-09)
 
 
