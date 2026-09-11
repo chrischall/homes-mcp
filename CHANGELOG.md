@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.4](https://github.com/chrischall/homes-mcp/compare/v1.4.3...v1.4.4) (2026-09-11)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 2.11.3, so the hosted extension pin persists ([#212](https://github.com/chrischall/homes-mcp/issues/212)) ([e6cd42b](https://github.com/chrischall/homes-mcp/commit/e6cd42b74370b8bbd9edcb0937e5733e16929d63))
+
 ## [1.4.3](https://github.com/chrischall/homes-mcp/compare/v1.4.2...v1.4.3) (2026-09-10)
 
 
