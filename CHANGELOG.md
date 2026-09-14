@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.4](https://github.com/chrischall/homes-mcp/compare/v1.4.3...v1.4.4) (2026-09-14)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 2.11.3, so the hosted extension pin persists ([#212](https://github.com/chrischall/homes-mcp/issues/212)) ([e6cd42b](https://github.com/chrischall/homes-mcp/commit/e6cd42b74370b8bbd9edcb0937e5733e16929d63))
+* **deps:** @fetchproxy/server 3.0.0 — protocol v4 (forward secrecy, AAD over the frame) ([#216](https://github.com/chrischall/homes-mcp/issues/216)) ([609129c](https://github.com/chrischall/homes-mcp/commit/609129c83ce8f1d817118c150ad316f2ce5b3740))
+* **deps:** bump the production-dependencies group with 3 updates ([#215](https://github.com/chrischall/homes-mcp/issues/215)) ([8484094](https://github.com/chrischall/homes-mcp/commit/8484094942a279bf373e86ec2bb2529d414c2890))
+
 ## [1.4.3](https://github.com/chrischall/homes-mcp/compare/v1.4.2...v1.4.3) (2026-09-10)
 
 
