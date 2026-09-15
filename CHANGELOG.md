@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.5](https://github.com/chrischall/homes-mcp/compare/v1.4.4...v1.4.5) (2026-09-15)
+
+
+### Bug Fixes
+
+* **deps:** @fetchproxy/server 3.0.1 — capped peer frames, logged load drops, atomic identity writes ([#220](https://github.com/chrischall/homes-mcp/issues/220)) ([632b84e](https://github.com/chrischall/homes-mcp/commit/632b84e443252531192492a0da0e4bb967482fce))
+
 ## [1.4.4](https://github.com/chrischall/homes-mcp/compare/v1.4.3...v1.4.4) (2026-09-14)
 
 
