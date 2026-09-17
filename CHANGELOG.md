@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/chrischall/homes-mcp/compare/v1.4.5...v2.0.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** migrate server to SDK v2 ([#222](https://github.com/chrischall/homes-mcp/issues/222))
+
+### Features
+
+* **mcp:** migrate server to SDK v2 ([#222](https://github.com/chrischall/homes-mcp/issues/222)) ([56a4aa3](https://github.com/chrischall/homes-mcp/commit/56a4aa3d3ba3f3056b05aa914b0b64eb4d5797c0))
+
 ## [1.4.5](https://github.com/chrischall/homes-mcp/compare/v1.4.4...v1.4.5) (2026-09-15)
 
 
