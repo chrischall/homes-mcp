@@ -1,28 +1,28 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { HomesClient } from '../client.js';
-import { viewArg, viewResponse } from '../view.js';
-import { collectAddressAlternates } from '@chrischall/realty-core';
-import { extractJsonLd, findGraphNode } from '../page-state.js';
-import { urlToPath } from '../url.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import type { HomesClient } from "../client.js";
+import { viewArg, viewResponse } from "../view.js";
+import { collectAddressAlternates } from "@chrischall/realty-core";
+import { extractJsonLd, findGraphNode } from "../page-state.js";
+import { urlToPath } from "../url.js";
 import {
   toNumber,
   firstImage,
   firstAgent,
   brokerageFrom,
   lastPathSegment,
-} from '../jsonld.js';
+} from "../jsonld.js";
 import {
   parseHtml,
   parseDollar,
   parseIntegerLoose,
   type HTMLElement,
-} from '../html.js';
+} from "../html.js";
 import {
   extractFeatures,
   loadCommunities,
   type ExtractedFeatures,
-} from '../features.js';
+} from "../features.js";
 import {
   buildPortalUrlHyperlink,
   computePriceDrop,
@@ -31,7 +31,7 @@ import {
   isTaxSentinel,
   lotSizeAcres,
   SQFT_PER_ACRE,
-} from '../format.js';
+} from "../format.js";
 import {
   normalizeEvents,
   parseLienHistory,
@@ -43,7 +43,7 @@ import {
   type NormalizedEvent,
   type OwnershipEvent,
   type TaxRecord,
-} from './history.js';
+} from "./history.js";
 
 /**
  * homes.com property detail: GET /property/<address-slug>/<propertyId>/
@@ -103,7 +103,7 @@ interface JsonLdOffer {
 }
 
 export interface JsonLdMainEntity {
-  '@type'?: string | string[];
+  "@type"?: string | string[];
   numberOfBedrooms?: number | string;
   numberOfBathroomsTotal?: number | string;
   floorSize?: JsonLdFloorSize;
@@ -115,8 +115,8 @@ export interface JsonLdMainEntity {
 }
 
 export interface JsonLdListing {
-  '@type'?: string | string[];
-  '@id'?: string;
+  "@type"?: string | string[];
+  "@id"?: string;
   name?: string;
   description?: string;
   url?: string;
@@ -290,7 +290,7 @@ export interface FormatOptions {
  * final segment. The `url` field is fragment-free.
  */
 export function extractPropertyId(listing: JsonLdListing): string {
-  return lastPathSegment(listing.url ?? listing['@id'] ?? '');
+  return lastPathSegment(listing.url ?? listing["@id"] ?? "");
 }
 
 /**
@@ -300,7 +300,7 @@ export function extractPropertyId(listing: JsonLdListing): string {
  */
 export function buildPath(args: { url?: string }): string {
   if (args.url) return urlToPath(args.url);
-  throw new Error('homes property tool: must provide `url`');
+  throw new Error("homes property tool: must provide `url`");
 }
 
 /**
@@ -308,8 +308,10 @@ export function buildPath(args: { url?: string }): string {
  * null if the doc has no graph or no listing node. We match on
  * `RealEstateListing` since that's the most specific of the dual types.
  */
-export function findListing(doc: ReturnType<typeof extractJsonLd>): JsonLdListing | null {
-  const node = findGraphNode(doc, 'RealEstateListing');
+export function findListing(
+  doc: ReturnType<typeof extractJsonLd>,
+): JsonLdListing | null {
+  const node = findGraphNode(doc, "RealEstateListing");
   return node as JsonLdListing | null;
 }
 
@@ -320,14 +322,14 @@ export function findListing(doc: ReturnType<typeof extractJsonLd>): JsonLdListin
  */
 export async function fetchListingRecord(
   client: HomesClient,
-  args: { url?: string }
+  args: { url?: string },
 ): Promise<{ listing: JsonLdListing; path: string; html: string }> {
   const path = buildPath(args);
   const html = await client.fetchHtml(path);
   const doc = extractJsonLd(html);
   if (!doc) {
     throw new Error(
-      `Could not locate JSON-LD at ${path}. homes.com may have changed their page structure.`
+      `Could not locate JSON-LD at ${path}. homes.com may have changed their page structure.`,
     );
   }
   const listing = findListing(doc);
@@ -337,7 +339,9 @@ export async function fetchListingRecord(
   return { listing, path, html };
 }
 
-function formatAgent(agent: JsonLdAgent | undefined): FormattedAgent | undefined {
+function formatAgent(
+  agent: JsonLdAgent | undefined,
+): FormattedAgent | undefined {
   if (!agent) return undefined;
   const out: FormattedAgent = {};
   if (agent.name) out.name = agent.name;
@@ -351,7 +355,7 @@ function formatAgent(agent: JsonLdAgent | undefined): FormattedAgent | undefined
 export function format(
   listing: JsonLdListing,
   html?: string,
-  opts: FormatOptions = {}
+  opts: FormatOptions = {},
 ): FormattedProperty {
   const main = listing.mainEntity ?? {};
   const addr = main.address ?? {};
@@ -377,7 +381,7 @@ export function format(
     ? extractFeatures(description, loadCommunities())
     : undefined;
 
-  const url = listing.url ?? listing['@id'] ?? '';
+  const url = listing.url ?? listing["@id"] ?? "";
   const out: FormattedProperty = {
     property_id: extractPropertyId(listing),
     url,
@@ -439,7 +443,10 @@ export function format(
   // (input order preserved, original casing returned, primary excluded).
   // Omit the field entirely when nothing genuinely differs.
   if (out.address_alternates) {
-    const filtered = collectAddressAlternates(out.address, out.address_alternates);
+    const filtered = collectAddressAlternates(
+      out.address,
+      out.address_alternates,
+    );
     if (filtered.length > 0) {
       out.address_alternates = filtered;
     } else {
@@ -481,51 +488,57 @@ export function format(
 
 export function registerPropertyTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_get_property',
+    "homes_get_property",
     {
-      title: 'Get homes.com property details',
+      title: "Get homes.com property details",
       description:
         "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot_size_sqft plus the derived lot_size_acres (round(lot_size_sqft / 43560, 2); both null — never 0 — for condos and listings with no lot), parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Get homes.com property details',
+        title: "Get homes.com property details",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         url: z
           .string()
           .describe(
-            'homes.com property detail URL or path (e.g. https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/). Required — pass the `url` field from a homes_search_properties result.'
+            "homes.com property detail URL or path (e.g. https://www.homes.com/property/3199-delmar-ln-nw-atlanta-ga/rxrzwg0kjnr32/). Required — pass the `url` field from a homes_search_properties result.",
           ),
         include_description: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            'When true, include the raw listing `description` marketing prose. Default false — the structured `extracted_features` field surfaces the keywords callers usually want; the prose itself is heavy chat-history weight.'
+            "When true, include the raw listing `description` marketing prose. Default false — the structured `extracted_features` field surfaces the keywords callers usually want; the prose itself is heavy chat-history weight.",
           ),
         include_price_history: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            'When true, inline `price_history` (listing/ownership/lien events + events_normalized) on the response — the same data `homes_get_property_history` returns. Saves a second round trip when you need both (#27).'
+            "When true, inline `price_history` (listing/ownership/lien events + events_normalized) on the response — the same data `homes_get_property_history` returns. Saves a second round trip when you need both (#27).",
           ),
         include_tax_history: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            'When true, inline `tax_history` records — same data `homes_get_tax_history` returns. Saves a second round trip when you need both (#27).'
+            "When true, inline `tax_history` records — same data `homes_get_tax_history` returns. Saves a second round trip when you need both (#27).",
           ),
         view: viewArg(),
-      },
+      }),
     },
-    async ({ url, include_description, include_price_history, include_tax_history, view }) => {
+    async ({
+      url,
+      include_description,
+      include_price_history,
+      include_tax_history,
+      view,
+    }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
       return viewResponse(
         view,
@@ -533,9 +546,9 @@ export function registerPropertyTools(
           includeDescription: include_description,
           includePriceHistory: include_price_history,
           includeTaxHistory: include_tax_history,
-        })
+        }),
       );
-    }
+    },
   );
 }
 
@@ -557,7 +570,7 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
   const out: Partial<FormattedProperty> = {};
 
   // Highlights
-  const hl = findUlAfterHeading(root, 'Highlights');
+  const hl = findUlAfterHeading(root, "Highlights");
   if (hl.length > 0) out.highlights = hl;
 
   // Estimated payment / Total Views — flat-text regex over the body.
@@ -575,32 +588,36 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
 
   // Matterport URL
   const matter = root
-    .querySelectorAll('a')
-    .find((a) => (a.getAttribute('href') ?? '').includes('matterport.com'));
-  if (matter) out.matterport_url = matter.getAttribute('href') ?? undefined;
+    .querySelectorAll("a")
+    .find((a) => (a.getAttribute("href") ?? "").includes("matterport.com"));
+  if (matter) out.matterport_url = matter.getAttribute("href") ?? undefined;
 
   // Floorplans — <img> whose src includes "floorplan"
   const fps = root
-    .querySelectorAll('img')
-    .map((img) => img.getAttribute('src') ?? '')
-    .filter((src) => src.includes('floorplan'));
+    .querySelectorAll("img")
+    .map((img) => img.getAttribute("src") ?? "")
+    .filter((src) => src.includes("floorplan"));
   if (fps.length > 0) out.floorplan_urls = fps;
 
   // Schools
-  const schoolItems = findUlAfterHeading(root, 'Schools');
+  const schoolItems = findUlAfterHeading(root, "Schools");
   if (schoolItems.length > 0) {
     out.schools = schoolItems.map(parseSchoolLine);
   }
 
   // Listing and Financial Details — HOA, MLS, source, tax.
-  const finText = findDivTextAfterHeading(root, 'Listing and Financial Details');
+  const finText = findDivTextAfterHeading(
+    root,
+    "Listing and Financial Details",
+  );
   if (finText) {
     // HOA. Capture both the dollar amount AND the trailing frequency
     // (e.g. "$250 / month", "$4,967 annually") so we can normalize to
     // monthly USD in format(). See #15.
-    const hoa = /HOA Fee:\s*\$?([0-9,]+|0)\s*(?:\/\s*(year|month|quarter|week)|(annually|monthly|quarterly|weekly|semi-?annually))?/i.exec(
-      finText
-    );
+    const hoa =
+      /HOA Fee:\s*\$?([0-9,]+|0)\s*(?:\/\s*(year|month|quarter|week)|(annually|monthly|quarterly|weekly|semi-?annually))?/i.exec(
+        finText,
+      );
     if (hoa) {
       const n = parseDollar(hoa[1]);
       if (n !== undefined) out.hoa_fee = n;
@@ -608,7 +625,7 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
       if (freq) out.hoa_frequency = freq.toLowerCase();
     } else if (/No HOA/i.test(bodyText)) {
       out.hoa_fee = 0;
-      out.hoa_frequency = 'month';
+      out.hoa_frequency = "month";
     }
     const mls = /MLS#?:?\s*([A-Z0-9-]+)/i.exec(finText);
     if (mls) out.mls_id = mls[1];
@@ -618,15 +635,17 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
     // leading word ("Source: FMLS Listing#: …" captured "FMLS Listing").
     // The negative lookahead keeps legitimate multi-word sources
     // ("Stellar MLS") while cutting at the next label.
-    const src = /Source:\s*([A-Z][A-Za-z0-9]*(?:\s+(?![A-Za-z0-9]+\s*[#:])[A-Z][A-Za-z0-9]*)*)/.exec(
-      finText
-    );
+    const src =
+      /Source:\s*([A-Z][A-Za-z0-9]*(?:\s+(?![A-Za-z0-9]+\s*[#:])[A-Z][A-Za-z0-9]*)*)/.exec(
+        finText,
+      );
     if (src) out.mls_source = src[1].trim();
     // Tax — homes.com surfaces "Annual Tax" / "Property Tax" / "Tax".
     // Capture the dollar amount; sentinel cleanup happens in format().
-    const tax = /(?:Annual Tax|Property Tax|Tax(?:es)?)(?: Amount)?:?\s*\$?([0-9,]+)/i.exec(
-      finText
-    );
+    const tax =
+      /(?:Annual Tax|Property Tax|Tax(?:es)?)(?: Amount)?:?\s*\$?([0-9,]+)/i.exec(
+        finText,
+      );
     if (tax) {
       const n = parseDollar(tax[1]);
       if (n !== undefined) out.tax_annual = n;
@@ -638,9 +657,10 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
     }
     // Previous list price (when homes.com surfaces a price-history hint
     // in the financial section). Used to derive price_drop_* (#16).
-    const prev = /(?:Previous(?:ly)?(?: List(?:ed)?)? Price|Was|Originally listed at)\s*:?\s*\$?([0-9,]+)/i.exec(
-      finText
-    );
+    const prev =
+      /(?:Previous(?:ly)?(?: List(?:ed)?)? Price|Was|Originally listed at)\s*:?\s*\$?([0-9,]+)/i.exec(
+        finText,
+      );
     if (prev) {
       const n = parseDollar(prev[1]);
       if (n !== undefined) out.previous_list_price = n;
@@ -649,7 +669,7 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
   // "No HOA" fallback even if no Listing+Financial section.
   if (out.hoa_fee === undefined && /No HOA/i.test(bodyText)) {
     out.hoa_fee = 0;
-    out.hoa_frequency = 'month';
+    out.hoa_frequency = "month";
   }
 
   // #23: Address alternates from MLS data attributes. homes.com pages
@@ -669,7 +689,7 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
   // DERIVED back from that sqft in format() via the cohort-standard
   // guarded conversion (#82), not read off the page text, so cross-MCP
   // lot-size math (and acres rounding) is consistent.
-  const lotText = findDivTextAfterHeading(root, 'Lot Details');
+  const lotText = findDivTextAfterHeading(root, "Lot Details");
   if (lotText) {
     const sqft = /([0-9,]+)\s*sqft/i.exec(lotText);
     if (sqft) {
@@ -688,11 +708,11 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
   }
 
   // Parking
-  const parkingText = findDivTextAfterHeading(root, 'Parking');
-  if (parkingText) out.parking = parkingText.replace(/\s+/g, ' ').trim();
+  const parkingText = findDivTextAfterHeading(root, "Parking");
+  if (parkingText) out.parking = parkingText.replace(/\s+/g, " ").trim();
 
   // Utilities — Heating / Cooling
-  const util = findDivTextAfterHeading(root, 'Utilities');
+  const util = findDivTextAfterHeading(root, "Utilities");
   if (util) {
     const heat = /Heating:\s*([^.]+)/i.exec(util);
     if (heat) out.heating = heat[1].trim();
@@ -705,33 +725,33 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
 
 function findUlAfterHeading(root: HTMLElement, heading: string): string[] {
   const needle = heading.toLowerCase();
-  const hs = root.querySelectorAll('h1, h2, h3, h4');
+  const hs = root.querySelectorAll("h1, h2, h3, h4");
   for (const h of hs) {
     if (!h.text.toLowerCase().includes(needle)) continue;
     // Search the heading's parent for the first <ul>.
     const parent = h.parentNode as HTMLElement | null;
-    const ul = parent?.querySelector('ul');
+    const ul = parent?.querySelector("ul");
     if (ul) {
       return ul
-        .querySelectorAll('li')
-        .map((li) => li.text.replace(/\s+/g, ' ').trim())
+        .querySelectorAll("li")
+        .map((li) => li.text.replace(/\s+/g, " ").trim())
         .filter(Boolean);
     }
     // Walk forward siblings.
     let cur: HTMLElement | null = h.nextElementSibling as HTMLElement | null;
     while (cur) {
       if (/^H[1-4]$/.test(cur.tagName)) break;
-      if (cur.tagName === 'UL') {
+      if (cur.tagName === "UL") {
         return cur
-          .querySelectorAll('li')
-          .map((li) => li.text.replace(/\s+/g, ' ').trim())
+          .querySelectorAll("li")
+          .map((li) => li.text.replace(/\s+/g, " ").trim())
           .filter(Boolean);
       }
-      const nested = cur.querySelector('ul');
+      const nested = cur.querySelector("ul");
       if (nested) {
         return nested
-          .querySelectorAll('li')
-          .map((li) => li.text.replace(/\s+/g, ' ').trim())
+          .querySelectorAll("li")
+          .map((li) => li.text.replace(/\s+/g, " ").trim())
           .filter(Boolean);
       }
       cur = cur.nextElementSibling as HTMLElement | null;
@@ -742,15 +762,15 @@ function findUlAfterHeading(root: HTMLElement, heading: string): string[] {
 
 function findDivTextAfterHeading(
   root: HTMLElement,
-  heading: string
+  heading: string,
 ): string | null {
   const needle = heading.toLowerCase();
-  const hs = root.querySelectorAll('h1, h2, h3, h4');
+  const hs = root.querySelectorAll("h1, h2, h3, h4");
   for (const h of hs) {
     if (!h.text.toLowerCase().includes(needle)) continue;
     const sib = h.nextElementSibling as HTMLElement | null;
-    if (sib && sib.tagName === 'DIV') {
-      return sib.text.replace(/\s+/g, ' ').trim();
+    if (sib && sib.tagName === "DIV") {
+      return sib.text.replace(/\s+/g, " ").trim();
     }
   }
   return null;
@@ -774,17 +794,19 @@ function gatherAddressAlternates(root: HTMLElement): string[] {
   const out: string[] = [];
   const add = (s: string | undefined): void => {
     if (!s) return;
-    const v = s.replace(/\s+/g, ' ').trim();
+    const v = s.replace(/\s+/g, " ").trim();
     if (v) out.push(v);
   };
   // data-unparsed-address attributes carried on hidden MLS-feed nodes.
   root
-    .querySelectorAll('[data-unparsed-address]')
-    .forEach((el) => add(el.getAttribute('data-unparsed-address') ?? undefined));
+    .querySelectorAll("[data-unparsed-address]")
+    .forEach((el) =>
+      add(el.getAttribute("data-unparsed-address") ?? undefined),
+    );
   // <li> rows under an "MLS Address" or "Alternate Address" heading.
-  const altItems = findUlAfterHeading(root, 'Alternate Address');
+  const altItems = findUlAfterHeading(root, "Alternate Address");
   for (const item of altItems) add(item);
-  const mlsItems = findUlAfterHeading(root, 'MLS Address');
+  const mlsItems = findUlAfterHeading(root, "MLS Address");
   for (const item of mlsItems) add(item);
   return out;
 }

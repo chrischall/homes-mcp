@@ -1,10 +1,10 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { HomesClient } from '../client.js';
-import { viewArg, viewResponse } from '../view.js';
-import { extractJsonLd } from '../page-state.js';
-import { findListings, formatHome, type FormattedHome } from './search.js';
-import { locationToSlug } from '../url.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import type { HomesClient } from "../client.js";
+import { viewArg, viewResponse } from "../view.js";
+import { extractJsonLd } from "../page-state.js";
+import { findListings, formatHome, type FormattedHome } from "./search.js";
+import { locationToSlug } from "../url.js";
 
 /**
  * `homes_get_market_report` — derive a sample-based market summary from
@@ -23,19 +23,28 @@ export interface SoldSummary {
 }
 
 export function computeMarketSummary(
-  items: Array<{ price?: number; sqft?: number }>
+  items: Array<{ price?: number; sqft?: number }>,
 ): SoldSummary {
-  const prices = items.map((i) => i.price).filter((p): p is number => typeof p === 'number');
+  const prices = items
+    .map((i) => i.price)
+    .filter((p): p is number => typeof p === "number");
   if (prices.length === 0) return { count: 0 };
   const sorted = [...prices].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   const median =
     sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
   const ppsfs = items
-    .filter((i) => typeof i.price === 'number' && typeof i.sqft === 'number' && i.sqft! > 0)
+    .filter(
+      (i) =>
+        typeof i.price === "number" &&
+        typeof i.sqft === "number" &&
+        i.sqft! > 0,
+    )
     .map((i) => i.price! / i.sqft!);
   const avgPpsf =
-    ppsfs.length > 0 ? Math.round(ppsfs.reduce((a, b) => a + b, 0) / ppsfs.length) : undefined;
+    ppsfs.length > 0
+      ? Math.round(ppsfs.reduce((a, b) => a + b, 0) / ppsfs.length)
+      : undefined;
   return {
     count: prices.length,
     median_price: median,
@@ -45,26 +54,26 @@ export function computeMarketSummary(
 
 export function registerMarketTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_get_market_report',
+    "homes_get_market_report",
     {
-      title: 'Get a homes.com market report for a location',
+      title: "Get a homes.com market report for a location",
       description:
         "Fetch homes.com's recently-sold listings for a city/ZIP/neighborhood and derive a market summary: count, median sale price, and average $/sqft across the sample. Pass `location` — free-text (e.g. 'Brooklyn, NY', '30311'). Returns `{ region, slug, sold_summary, sample_sold }`. Note: homes.com's sold page typically returns ~40 recent listings — this is a sample-based summary, not an exhaustive market index. Read-only.",
       annotations: {
-        title: 'Get a homes.com market report for a location',
+        title: "Get a homes.com market report for a location",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         location: z
           .string()
-          .describe('Free-text location: city, ZIP, neighborhood'),
+          .describe("Free-text location: city, ZIP, neighborhood"),
         view: viewArg(),
-      },
+      }),
     },
     async ({ location, view }) => {
       const slug = locationToSlug(location);
@@ -81,6 +90,6 @@ export function registerMarketTools(
         sold_summary: computeMarketSummary(sample),
         sample_sold: sample,
       });
-    }
+    },
   );
 }

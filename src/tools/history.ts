@@ -1,7 +1,7 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import type { HomesClient } from "../client.js";
+import { minifiedResult } from "../mcp.js";
 import {
   parseHtml,
   parsePropertyTable,
@@ -9,11 +9,14 @@ import {
   parseDollar,
   parsePercent,
   type HTMLElement,
-} from '../html.js';
-import { urlToPath } from '../url.js';
-import { lastPathSegment } from '../jsonld.js';
-import { mapEventType, type NormalizedEventType } from '@chrischall/realty-core';
-import { extractJsonLd, findGraphNode } from '../page-state.js';
+} from "../html.js";
+import { urlToPath } from "../url.js";
+import { lastPathSegment } from "../jsonld.js";
+import {
+  mapEventType,
+  type NormalizedEventType,
+} from "@chrischall/realty-core";
+import { extractJsonLd, findGraphNode } from "../page-state.js";
 
 /**
  * homes.com detail pages render four parallel history tables:
@@ -72,15 +75,15 @@ export function normalizeEvents(events: ListingEvent[]): NormalizedEvent[] {
     // rows (with a stderr warning) exactly as the old inline mapper did,
     // so the normalized output never carries `'Unknown'`.
     const type = mapEventType(e.event);
-    if (type === 'Unknown') {
+    if (type === "Unknown") {
       console.error(
-        `[homes-mcp] events_normalized: unrecognized event "${e.event}" — dropped from normalized list`
+        `[homes-mcp] events_normalized: unrecognized event "${e.event}" — dropped from normalized list`,
       );
       continue;
     }
     const rec: NormalizedEvent = { date: e.date, type };
-    if (typeof e.price === 'number') rec.price = e.price;
-    if (typeof e.list_to_sale_pct === 'number') {
+    if (typeof e.price === "number") rec.price = e.price;
+    if (typeof e.list_to_sale_pct === "number") {
       rec.price_change_pct = e.list_to_sale_pct;
     }
     out.push(rec);
@@ -105,8 +108,8 @@ export interface LienEvent {
 }
 
 function withDate<T extends { date: string; date_raw?: string }>(
-  base: Omit<T, 'date' | 'date_raw'>,
-  rawDate: string
+  base: Omit<T, "date" | "date_raw">,
+  rawDate: string,
 ): T {
   const n = normalizeDate(rawDate);
   const out = { ...base, date: n.iso ?? n.raw } as T;
@@ -115,14 +118,14 @@ function withDate<T extends { date: string; date_raw?: string }>(
 }
 
 export function parsePropertyHistory(root: HTMLElement): ListingEvent[] {
-  const t = parsePropertyTable(root, 'Property History');
+  const t = parsePropertyTable(root, "Property History");
   if (!t) return [];
   return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [date, event, price, listToSale, ppsf] = cells;
-      const base: Omit<ListingEvent, 'date' | 'date_raw'> = {
-        event: (event ?? '').trim(),
+      const base: Omit<ListingEvent, "date" | "date_raw"> = {
+        event: (event ?? "").trim(),
       };
       if (price !== undefined) {
         const n = parseDollar(price);
@@ -136,45 +139,45 @@ export function parsePropertyHistory(root: HTMLElement): ListingEvent[] {
         const n = parseDollar(ppsf);
         if (n !== undefined) base.price_per_sqft = n;
       }
-      return withDate<ListingEvent>(base, date ?? '');
+      return withDate<ListingEvent>(base, date ?? "");
     });
 }
 
 export function parseOwnershipHistory(root: HTMLElement): OwnershipEvent[] {
-  const t = parsePropertyTable(root, 'Purchase History');
+  const t = parsePropertyTable(root, "Purchase History");
   if (!t) return [];
   return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [date, deedType, salePrice, titleCo] = cells;
-      const base: Omit<OwnershipEvent, 'date' | 'date_raw'> = {};
+      const base: Omit<OwnershipEvent, "date" | "date_raw"> = {};
       if (deedType) base.deed_type = deedType.trim();
       if (salePrice !== undefined) {
         const n = parseDollar(salePrice);
         if (n !== undefined) base.sale_price = n;
       }
-      if (titleCo && titleCo.trim() !== '--' && titleCo.trim() !== '') {
+      if (titleCo && titleCo.trim() !== "--" && titleCo.trim() !== "") {
         base.title_company = titleCo.trim();
       }
-      return withDate<OwnershipEvent>(base, date ?? '');
+      return withDate<OwnershipEvent>(base, date ?? "");
     });
 }
 
 export function parseLienHistory(root: HTMLElement): LienEvent[] {
-  const t = parsePropertyTable(root, 'Mortgage History');
+  const t = parsePropertyTable(root, "Mortgage History");
   if (!t) return [];
   return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [date, status, loanAmt, loanType] = cells;
-      const base: Omit<LienEvent, 'date' | 'date_raw'> = {};
+      const base: Omit<LienEvent, "date" | "date_raw"> = {};
       if (status) base.status = status.trim();
       if (loanAmt !== undefined) {
         const n = parseDollar(loanAmt);
         if (n !== undefined) base.loan_amount = n;
       }
       if (loanType) base.loan_type = loanType.trim();
-      return withDate<LienEvent>(base, date ?? '');
+      return withDate<LienEvent>(base, date ?? "");
     });
 }
 
@@ -187,13 +190,13 @@ export interface TaxRecord {
 }
 
 export function parseTaxHistory(root: HTMLElement): TaxRecord[] {
-  const t = parsePropertyTable(root, 'Tax History');
+  const t = parsePropertyTable(root, "Tax History");
   if (!t) return [];
   return t.rows
     .filter((cells) => cells.length >= 2)
     .map((cells) => {
       const [yearRaw, paid, assess, land, improvement] = cells;
-      const year = Number((yearRaw ?? '').trim());
+      const year = Number((yearRaw ?? "").trim());
       const rec: TaxRecord = { year: Number.isFinite(year) ? year : 0 };
       const p = paid !== undefined ? parseDollar(paid) : undefined;
       if (p !== undefined) rec.tax_paid = p;
@@ -201,7 +204,8 @@ export function parseTaxHistory(root: HTMLElement): TaxRecord[] {
       if (a !== undefined) rec.assessment_total = a;
       const l = land !== undefined ? parseDollar(land) : undefined;
       if (l !== undefined) rec.assessment_land = l;
-      const i = improvement !== undefined ? parseDollar(improvement) : undefined;
+      const i =
+        improvement !== undefined ? parseDollar(improvement) : undefined;
       if (i !== undefined) rec.assessment_improvement = i;
       return rec;
     })
@@ -210,33 +214,36 @@ export function parseTaxHistory(root: HTMLElement): TaxRecord[] {
 
 function extractPropertyIdFromHtml(html: string, fallbackUrl: string): string {
   const doc = extractJsonLd(html);
-  const node = findGraphNode(doc, 'RealEstateListing') as
-    | { '@id'?: string; url?: string }
-    | null;
+  const node = findGraphNode(doc, "RealEstateListing") as {
+    "@id"?: string;
+    url?: string;
+  } | null;
   // Prefer node.url over node['@id'] — see properties.ts:extractPropertyId
   // (homes.com @id now carries a `#realestatelisting` fragment).
-  return lastPathSegment(node?.url ?? node?.['@id'] ?? fallbackUrl);
+  return lastPathSegment(node?.url ?? node?.["@id"] ?? fallbackUrl);
 }
 
 export function registerHistoryTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_get_property_history',
+    "homes_get_property_history",
     {
-      title: 'Get homes.com property history (DEPRECATED — use homes_get_history)',
+      title:
+        "Get homes.com property history (DEPRECATED — use homes_get_history)",
       description:
         "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_price_history: true })`. Same data, fewer round trips. Will be removed in a future major version. Three timelines for a homes.com property in one call: `listing_events`, `ownership_events`, `lien_events`. Also returns `events_normalized` mapped onto the cross-MCP enum.",
       annotations: {
-        title: 'Get homes.com property history (DEPRECATED — use homes_get_history)',
+        title:
+          "Get homes.com property history (DEPRECATED — use homes_get_history)",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
-        url: z.string().describe('homes.com property detail URL or path.'),
-      },
+      inputSchema: z.object({
+        url: z.string().describe("homes.com property detail URL or path."),
+      }),
     },
     async ({ url }) => {
       const path = urlToPath(url);
@@ -251,24 +258,26 @@ export function registerHistoryTools(
         ownership_events: parseOwnershipHistory(root),
         lien_events: parseLienHistory(root),
       });
-    }
+    },
   );
 
   server.registerTool(
-    'homes_get_tax_history',
+    "homes_get_tax_history",
     {
-      title: 'Get homes.com property tax history (DEPRECATED — use homes_get_history)',
+      title:
+        "Get homes.com property tax history (DEPRECATED — use homes_get_history)",
       description:
         "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_tax_history: true })`. Same data, fewer round trips; note that `homes_get_history` returns the tax array as `tax_records` (not `records`). Will be removed in a future major version. Year-by-year property-tax records: tax paid, total assessed value, land/improvement split.",
       annotations: {
-        title: 'Get homes.com property tax history (DEPRECATED — use homes_get_history)',
+        title:
+          "Get homes.com property tax history (DEPRECATED — use homes_get_history)",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
-        url: z.string().describe('homes.com property detail URL or path.'),
-      },
+      inputSchema: z.object({
+        url: z.string().describe("homes.com property detail URL or path."),
+      }),
     },
     async ({ url }) => {
       const path = urlToPath(url);
@@ -279,27 +288,27 @@ export function registerHistoryTools(
         url,
         records: parseTaxHistory(root),
       });
-    }
+    },
   );
 
   // #31: combined endpoint that returns BOTH price + tax history. Same
   // fetch as either split tool — preferred over the split surface
   // (which is now marked DEPRECATED in its tool descriptions).
   server.registerTool(
-    'homes_get_history',
+    "homes_get_history",
     {
-      title: 'Get homes.com property + tax history (combined)',
+      title: "Get homes.com property + tax history (combined)",
       description:
         "Combined history endpoint — replaces `homes_get_property_history` + `homes_get_tax_history` with a single fetch. Returns `{ property_id, url, listing_events, ownership_events, lien_events, events_normalized, tax_records }`. Pass `url` — the full property detail URL. Series are `[]` when the listing doesn't carry that section. Cross-MCP-normalized `events_normalized` carries the same enum across siblings (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted). Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Get homes.com property + tax history (combined)',
+        title: "Get homes.com property + tax history (combined)",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
-        url: z.string().describe('homes.com property detail URL or path.'),
-      },
+      inputSchema: z.object({
+        url: z.string().describe("homes.com property detail URL or path."),
+      }),
     },
     async ({ url }) => {
       const path = urlToPath(url);
@@ -315,6 +324,6 @@ export function registerHistoryTools(
         events_normalized: normalizeEvents(listing_events),
         tax_records: parseTaxHistory(root),
       });
-    }
+    },
   );
 }

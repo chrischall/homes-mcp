@@ -1,6 +1,6 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { minifiedResult } from '../mcp.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { minifiedResult } from "../mcp.js";
 
 /**
  * Local-only rent-vs-buy projection. Same input/output contract as
@@ -77,7 +77,7 @@ function remainingLoanAfterYears(
   loan: number,
   annualRate: number,
   termYears: number,
-  yearsElapsed: number
+  yearsElapsed: number,
 ): number {
   if (loan <= 0) return 0;
   if (annualRate <= 0) {
@@ -88,7 +88,8 @@ function remainingLoanAfterYears(
   const k = yearsElapsed * 12;
   return Math.max(
     0,
-    (loan * (Math.pow(1 + r, n) - Math.pow(1 + r, k))) / (Math.pow(1 + r, n) - 1)
+    (loan * (Math.pow(1 + r, n) - Math.pow(1 + r, k))) /
+      (Math.pow(1 + r, n) - 1),
   );
 }
 
@@ -125,7 +126,8 @@ export function estimateRentVsBuy(input: RentVsBuyInput): RentVsBuyResult {
     const annualPI = piMonthly * 12;
     const annualTax = homeValue * taxRate;
     const annualMaint = homeValue * maintRate;
-    buyOutflow += annualPI + annualTax + insuranceAnnual + hoaMonthly * 12 + annualMaint;
+    buyOutflow +=
+      annualPI + annualTax + insuranceAnnual + hoaMonthly * 12 + annualMaint;
     homeValue *= 1 + apprRate;
     renterPool *= 1 + invReturn;
 
@@ -135,7 +137,12 @@ export function estimateRentVsBuy(input: RentVsBuyInput): RentVsBuyResult {
     if (y < horizon) {
       buy.push(buyOutflow);
     } else {
-      const remainingLoanY = remainingLoanAfterYears(loan, input.interest_rate, term, y);
+      const remainingLoanY = remainingLoanAfterYears(
+        loan,
+        input.interest_rate,
+        term,
+        y,
+      );
       const saleProceeds = homeValue * (1 - sellingRate) - remainingLoanY;
       const renterAdvantage = renterPool - startingCapital;
       buy.push(buyOutflow - saleProceeds + renterAdvantage);
@@ -179,18 +186,18 @@ export function estimateRentVsBuy(input: RentVsBuyInput): RentVsBuyResult {
 
 export function registerRentVsBuyTools(server: McpServer): void {
   server.registerTool(
-    'homes_estimate_rent_vs_buy',
+    "homes_estimate_rent_vs_buy",
     {
-      title: 'Project cumulative buy-vs-rent cost over N years',
+      title: "Project cumulative buy-vs-rent cost over N years",
       description:
-        'Project the cumulative cost of buying a home versus renting a comparable place over N years. Accounts for down payment, closing costs, monthly PITI, maintenance (~1%/yr default), appreciation (~3%/yr default), rent growth (~3%/yr default), and the opportunity cost of the down payment (renter invests it at investment_return_rate, default 6%/yr). Returns year-by-year cumulative costs, break-even year, and the net difference at horizon. No network — pure local math. Same math contract as zillow_estimate_rent_vs_buy. NOTE: caller must supply `monthly_rent` — homes.com does not publish rental estimates anywhere on its consumer site (no rent_zestimate analogue, no comparable-rentals endpoint). For a rent estimate to plug in here, use `zillow_get_property` (its `rent_zestimate` field) or `redfin_get_comparable_rentals`.',
+        "Project the cumulative cost of buying a home versus renting a comparable place over N years. Accounts for down payment, closing costs, monthly PITI, maintenance (~1%/yr default), appreciation (~3%/yr default), rent growth (~3%/yr default), and the opportunity cost of the down payment (renter invests it at investment_return_rate, default 6%/yr). Returns year-by-year cumulative costs, break-even year, and the net difference at horizon. No network — pure local math. Same math contract as zillow_estimate_rent_vs_buy. NOTE: caller must supply `monthly_rent` — homes.com does not publish rental estimates anywhere on its consumer site (no rent_zestimate analogue, no comparable-rentals endpoint). For a rent estimate to plug in here, use `zillow_get_property` (its `rent_zestimate` field) or `redfin_get_comparable_rentals`.",
       annotations: {
-        title: 'Project cumulative buy-vs-rent cost over N years',
+        title: "Project cumulative buy-vs-rent cost over N years",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: false,
       },
-      inputSchema: {
+      inputSchema: z.object({
         home_price: z.number().positive(),
         down_payment: z.number().nonnegative(),
         interest_rate: z.number().nonnegative(),
@@ -206,8 +213,8 @@ export function registerRentVsBuyTools(server: McpServer): void {
         appreciation_rate: z.number().optional(),
         rent_growth_rate: z.number().optional(),
         investment_return_rate: z.number().nonnegative().optional(),
-      },
+      }),
     },
-    async (i) => minifiedResult(estimateRentVsBuy(i as RentVsBuyInput))
+    async (i) => minifiedResult(estimateRentVsBuy(i as RentVsBuyInput)),
   );
 }

@@ -1,8 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   registerSessionTools as registerSharedSessionTools,
   type SessionRegistry,
-} from '@chrischall/mcp-utils/session';
+} from "@chrischall/mcp-utils/session";
 
 /**
  * MCP tool surface for the shared session registry (#20, #21).
@@ -30,10 +30,10 @@ import {
  */
 export function registerSessionsTools(
   server: McpServer,
-  registry: SessionRegistry
+  registry: SessionRegistry,
 ): void {
   registerSharedSessionTools(server, registry, {
-    prefix: 'homes',
-    serviceLabel: 'Homes',
+    prefix: "homes",
+    serviceLabel: "Homes",
   });
 }

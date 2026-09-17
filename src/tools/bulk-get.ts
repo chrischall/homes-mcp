@@ -1,18 +1,18 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { runBoundedBatch } from '@chrischall/mcp-utils';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { runBoundedBatch } from "@chrischall/mcp-utils";
 import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
   retryOnceOnTimeout,
-} from '@chrischall/mcp-utils/fetchproxy';
-import type { HomesClient } from '../client.js';
-import { viewArg, viewResponse } from '../view.js';
+} from "@chrischall/mcp-utils/fetchproxy";
+import type { HomesClient } from "../client.js";
+import { viewArg, viewResponse } from "../view.js";
 import {
   fetchListingRecord,
   format,
   type FormattedProperty,
-} from './properties.js';
+} from "./properties.js";
 
 /**
  * `homes_bulk_get` — unbounded structured fetch for the
@@ -60,7 +60,7 @@ export interface BulkGetTuning {
  * pending URLs in a follow-up batch. Mirrors `homes_resolve_addresses`'
  * `RowStatus` (#54).
  */
-type RowStatus = 'ok' | 'pending' | 'error';
+type RowStatus = "ok" | "pending" | "error";
 
 interface BulkRow {
   url: string;
@@ -74,38 +74,38 @@ interface BulkRow {
 export function registerBulkGetTools(
   server: McpServer,
   client: HomesClient,
-  tuning: BulkGetTuning = {}
+  tuning: BulkGetTuning = {},
 ): void {
   const overallDeadlineMs = tuning.overallDeadlineMs ?? BULK_GET_DEADLINE_MS;
   server.registerTool(
-    'homes_bulk_get',
+    "homes_bulk_get",
     {
-      title: 'Bulk-fetch homes.com properties (structured records only)',
+      title: "Bulk-fetch homes.com properties (structured records only)",
       description:
-        "Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won't fail the whole call). Each row carries a `status` (`ok` / `error` / `pending`). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: \"pending\"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.",
+        'Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won\'t fail the whole call). Each row carries a `status` (`ok` / `error` / `pending`). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: "pending"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.',
       annotations: {
-        title: 'Bulk-fetch homes.com properties (structured records only)',
+        title: "Bulk-fetch homes.com properties (structured records only)",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         urls: z
           .array(z.string())
           .min(1)
           .max(MAX_URLS)
           .describe(
-            `Array of homes.com property URLs or paths (e.g. from a homes_search_properties result). 1–${MAX_URLS} per call.`
+            `Array of homes.com property URLs or paths (e.g. from a homes_search_properties result). 1–${MAX_URLS} per call.`,
           ),
         include_description: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            'When true, include the raw listing `description` marketing prose per-row. Default false.'
+            "When true, include the raw listing `description` marketing prose per-row. Default false.",
           ),
         view: viewArg(),
-      },
+      }),
     },
     async ({ urls, include_description, view }) => {
       // #54 partial-results contract (D1), now via `runBoundedBatch`
@@ -131,14 +131,14 @@ export function registerBulkGetTools(
         urls,
         async (url) => {
           const { listing, html } = await retryOnceOnTimeout(() =>
-            fetchListingRecord(client, { url })
+            fetchListingRecord(client, { url }),
           );
           const formatted = format(listing, html, {
             includeDescription: include_description,
           });
           return {
             url,
-            status: 'ok',
+            status: "ok",
             property_id: formatted.property_id,
             property: formatted,
           };
@@ -148,21 +148,21 @@ export function registerBulkGetTools(
           concurrency: BRIDGE_CONCURRENCY,
           onError: (url, _index, e) => ({
             url,
-            status: 'error',
+            status: "error",
             error: classifyRowError(e).message,
           }),
           onTimeout: (url) => ({
             url,
-            status: 'pending',
+            status: "pending",
             error:
-              'bulk_get overall deadline reached before this row settled — the ' +
-              'request is still pending (likely a slow/hung sub-request). Re-run ' +
-              'just the pending URLs; a single slow row no longer wedges the batch.',
+              "bulk_get overall deadline reached before this row settled — the " +
+              "request is still pending (likely a slow/hung sub-request). Re-run " +
+              "just the pending URLs; a single slow row no longer wedges the batch.",
           }),
-        }
+        },
       );
 
-      const pending = rows.filter((r) => r.status === 'pending').length;
+      const pending = rows.filter((r) => r.status === "pending").length;
       const envelope: {
         count: number;
         pending?: number;
@@ -170,6 +170,6 @@ export function registerBulkGetTools(
       } = { count: rows.length, results: rows };
       if (pending > 0) envelope.pending = pending;
       return viewResponse(view, envelope);
-    }
+    },
   );
 }
