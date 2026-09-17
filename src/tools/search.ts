@@ -1,16 +1,16 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { HomesClient } from '../client.js';
-import { viewArg, viewResponse } from '../view.js';
-import { extractJsonLd, findGraphNode } from '../page-state.js';
-import { locationToSlug } from '../url.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import type { HomesClient } from "../client.js";
+import { viewArg, viewResponse } from "../view.js";
+import { extractJsonLd, findGraphNode } from "../page-state.js";
+import { locationToSlug } from "../url.js";
 import {
   toNumber,
   firstImage,
   firstAgent,
   brokerageFrom,
   lastPathSegment,
-} from '../jsonld.js';
+} from "../jsonld.js";
 
 /**
  * homes.com search-results are server-rendered at
@@ -63,7 +63,7 @@ interface JsonLdOffer {
 }
 
 export interface JsonLdMainEntity {
-  '@type'?: string | string[];
+  "@type"?: string | string[];
   numberOfBedrooms?: number | string;
   numberOfBathroomsTotal?: number | string;
   floorSize?: JsonLdFloorSize;
@@ -75,8 +75,8 @@ export interface JsonLdMainEntity {
 }
 
 export interface JsonLdListingItem {
-  '@type'?: string | string[];
-  '@id'?: string;
+  "@type"?: string | string[];
+  "@id"?: string;
   name?: string;
   description?: string;
   url?: string;
@@ -117,7 +117,7 @@ export interface FormattedHome {
  * any `?query`) before taking the final segment.
  */
 export function extractPropertyId(item: JsonLdListingItem): string {
-  return lastPathSegment(item.url ?? item['@id'] ?? '');
+  return lastPathSegment(item.url ?? item["@id"] ?? "");
 }
 
 export function formatHome(item: JsonLdListingItem): FormattedHome | null {
@@ -130,7 +130,7 @@ export function formatHome(item: JsonLdListingItem): FormattedHome | null {
   const sqft = toNumber(main.floorSize?.value);
   // homes.com URL is normally fully-qualified in JSON-LD. Fall back to
   // the @id if `url` is missing.
-  const url = item.url ?? item['@id'] ?? '';
+  const url = item.url ?? item["@id"] ?? "";
   return {
     property_id: id,
     url,
@@ -150,21 +150,12 @@ export function formatHome(item: JsonLdListingItem): FormattedHome | null {
 }
 
 export type PropertyType =
-  | 'single_family'
-  | 'condo'
-  | 'townhouse'
-  | 'land'
-  | 'mobile'
-  | 'multi_family';
+  "single_family" | "condo" | "townhouse" | "land" | "mobile" | "multi_family";
 
 export type ListingType =
-  | 'for_sale'
-  | 'sold'
-  | 'for_rent'
-  | 'open_houses'
-  | 'new_construction';
+  "for_sale" | "sold" | "for_rent" | "open_houses" | "new_construction";
 
-export type SortOption = 'newest';
+export type SortOption = "newest";
 
 export interface SearchInput {
   location: string;
@@ -204,11 +195,11 @@ export function validatePriceBand(band: {
 }): void {
   const { price_min, price_max } = band;
   for (const [name, v] of [
-    ['price_min', price_min],
-    ['price_max', price_max],
+    ["price_min", price_min],
+    ["price_max", price_max],
   ] as const) {
     if (v === undefined) continue;
-    if (typeof v !== 'number' || !Number.isFinite(v)) {
+    if (typeof v !== "number" || !Number.isFinite(v)) {
       throw new Error(`${name} must be a finite number (got ${String(v)}).`);
     }
     if (v < 0) {
@@ -221,27 +212,27 @@ export function validatePriceBand(band: {
     price_min > price_max
   ) {
     throw new Error(
-      `price_min (${price_min}) must be <= price_max (${price_max}).`
+      `price_min (${price_min}) must be <= price_max (${price_max}).`,
     );
   }
 }
 
 const TYPE_TO_SLUG_SALE: Record<PropertyType, string> = {
-  single_family: 'houses',
-  condo: 'condos',
-  townhouse: 'townhouses',
-  land: 'land',
-  mobile: 'mobile-homes',
-  multi_family: 'multi-family',
+  single_family: "houses",
+  condo: "condos",
+  townhouse: "townhouses",
+  land: "land",
+  mobile: "mobile-homes",
+  multi_family: "multi-family",
 };
 
 const TYPE_TO_SLUG_RENT: Record<PropertyType, string> = {
-  single_family: 'houses',
-  condo: 'condos',
-  townhouse: 'townhouses',
-  land: 'land', // not a real homes.com rent path; falls back to /homes-for-rent/
-  mobile: 'mobile-homes', // same
-  multi_family: 'multi-family', // same
+  single_family: "houses",
+  condo: "condos",
+  townhouse: "townhouses",
+  land: "land", // not a real homes.com rent path; falls back to /homes-for-rent/
+  mobile: "mobile-homes", // same
+  multi_family: "multi-family", // same
 };
 
 /**
@@ -286,33 +277,35 @@ export function buildSearchPath(input: SearchInput): string {
   const query = buildPriceQuery(input.price_min, input.price_max);
 
   // new_construction has its own URL root; other params are ignored.
-  if (input.listing_type === 'new_construction') {
+  if (input.listing_type === "new_construction") {
     return `/new-homes/for-sale/${slug}/${query}`;
   }
 
-  let segment = '';
-  if (input.listing_type === 'sold') {
-    segment = 'sold';
-  } else if (input.listing_type === 'open_houses') {
-    segment = 'open-houses';
-  } else if (input.listing_type === 'for_rent') {
+  let segment = "";
+  if (input.listing_type === "sold") {
+    segment = "sold";
+  } else if (input.listing_type === "open_houses") {
+    segment = "open-houses";
+  } else if (input.listing_type === "for_rent") {
     const typeSlug = input.property_type
       ? TYPE_TO_SLUG_RENT[input.property_type]
       : undefined;
-    const rentable = new Set(['houses', 'condos', 'townhouses']);
+    const rentable = new Set(["houses", "condos", "townhouses"]);
     segment =
-      typeSlug && rentable.has(typeSlug) ? `${typeSlug}-for-rent` : 'homes-for-rent';
+      typeSlug && rentable.has(typeSlug)
+        ? `${typeSlug}-for-rent`
+        : "homes-for-rent";
   } else if (input.property_type) {
     // listing_type undefined or 'for_sale'
     segment = `${TYPE_TO_SLUG_SALE[input.property_type]}-for-sale`;
   }
 
-  const sort = input.sort === 'newest' ? 'newest' : '';
+  const sort = input.sort === "newest" ? "newest" : "";
 
   const parts: string[] = [slug];
   if (segment) parts.push(segment);
   if (sort) parts.push(sort);
-  return `/${parts.join('/')}/${query}`;
+  return `/${parts.join("/")}/${query}`;
 }
 
 /**
@@ -323,12 +316,12 @@ export function buildSearchPath(input: SearchInput): string {
  */
 function buildPriceQuery(
   priceMin: number | undefined,
-  priceMax: number | undefined
+  priceMax: number | undefined,
 ): string {
   const params: string[] = [];
   if (priceMin !== undefined) params.push(`price-min=${Math.floor(priceMin)}`);
   if (priceMax !== undefined) params.push(`price-max=${Math.floor(priceMax)}`);
-  return params.length > 0 ? `?${params.join('&')}` : '';
+  return params.length > 0 ? `?${params.join("&")}` : "";
 }
 
 interface CollectionPageMainEntity {
@@ -337,7 +330,7 @@ interface CollectionPageMainEntity {
 }
 
 interface CollectionPage {
-  '@type'?: string | string[];
+  "@type"?: string | string[];
   mainEntity?: CollectionPageMainEntity;
 }
 
@@ -349,7 +342,7 @@ export function findListings(doc: ReturnType<typeof extractJsonLd>): {
   total?: number;
   items: JsonLdListingItem[];
 } {
-  const page = findGraphNode(doc, 'CollectionPage') as CollectionPage | null;
+  const page = findGraphNode(doc, "CollectionPage") as CollectionPage | null;
   const main = page?.mainEntity;
   return {
     total: main?.numberOfItems,
@@ -359,26 +352,26 @@ export function findListings(doc: ReturnType<typeof extractJsonLd>): {
 
 export function registerSearchTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_search_properties',
+    "homes_search_properties",
     {
-      title: 'Search homes.com listings',
+      title: "Search homes.com listings",
       description:
         "Search homes.com listings by free-text location (city, ZIP, neighborhood). Optionally filter by property_type (single_family/condo/townhouse/land/mobile/multi_family), listing_type (for_sale/sold/for_rent/open_houses/new_construction), and sort (newest). Slugifies the location into homes.com's URL routing (e.g. 'Atlanta, GA' + condo + for_sale → /atlanta-ga/condos-for-sale/). Parses the embedded Schema.org JSON-LD to return each listing's address, price, beds/baths, sqft, primary photo, listing agent + brokerage, and the homes.com property URL. KNOWN CAP: homes.com server-renders ~40 listings per page; the response carries `truncated: true` + `total_estimated` when the market has more. To enumerate a busy market, price-band or sub-area your search until each segment fits under the cap. Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Search homes.com listings',
+        title: "Search homes.com listings",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         view: viewArg(),
         location: z
           .string()
           .describe(
-            'Free-text location: city, ZIP, neighborhood (e.g. "Atlanta, GA", "Brooklyn, NY", "30311", "Park Slope")'
+            'Free-text location: city, ZIP, neighborhood (e.g. "Atlanta, GA", "Brooklyn, NY", "30311", "Park Slope")',
           ),
         limit: z
           .number()
@@ -386,29 +379,35 @@ export function registerSearchTools(
           .positive()
           .optional()
           .describe(
-            'Max listings to return (default 40, which is also the homes.com SSR page size). Passing >40 will still cap at the page size; the response will set `truncated: true` and `total_estimated` to homes.com\'s reported total.'
+            "Max listings to return (default 40, which is also the homes.com SSR page size). Passing >40 will still cap at the page size; the response will set `truncated: true` and `total_estimated` to homes.com's reported total.",
           ),
         property_type: z
           .enum([
-            'single_family',
-            'condo',
-            'townhouse',
-            'land',
-            'mobile',
-            'multi_family',
+            "single_family",
+            "condo",
+            "townhouse",
+            "land",
+            "mobile",
+            "multi_family",
           ])
           .optional()
           .describe(
-            'Restrict to a specific homes.com property type. Composes with listing_type.'
+            "Restrict to a specific homes.com property type. Composes with listing_type.",
           ),
         listing_type: z
-          .enum(['for_sale', 'sold', 'for_rent', 'open_houses', 'new_construction'])
+          .enum([
+            "for_sale",
+            "sold",
+            "for_rent",
+            "open_houses",
+            "new_construction",
+          ])
           .optional()
           .describe(
-            'Search axis. Defaults to for_sale. "sold" returns recently-sold listings (useful for market context). "for_rent" returns rentals. "open_houses" returns listings with scheduled open houses. "new_construction" returns builder listings under /new-homes/.'
+            'Search axis. Defaults to for_sale. "sold" returns recently-sold listings (useful for market context). "for_rent" returns rentals. "open_houses" returns listings with scheduled open houses. "new_construction" returns builder listings under /new-homes/.',
           ),
         sort: z
-          .enum(['newest'])
+          .enum(["newest"])
           .optional()
           .describe('Sort order. Only "newest" is currently supported.'),
         price_min: z
@@ -416,16 +415,16 @@ export function registerSearchTools(
           .nonnegative()
           .optional()
           .describe(
-            'Lower price bound in USD (inclusive). Emitted as homes.com\'s `?price-min=` filter. Composes with property_type / listing_type. Must be <= price_max when both are given.'
+            "Lower price bound in USD (inclusive). Emitted as homes.com's `?price-min=` filter. Composes with property_type / listing_type. Must be <= price_max when both are given.",
           ),
         price_max: z
           .number()
           .nonnegative()
           .optional()
           .describe(
-            'Upper price bound in USD (inclusive). Emitted as homes.com\'s `?price-max=` filter. Pair with price_min to band a busy market under the ~40-listing SSR cap.'
+            "Upper price bound in USD (inclusive). Emitted as homes.com's `?price-max=` filter. Pair with price_min to band a busy market under the ~40-listing SSR cap.",
           ),
-      },
+      }),
     },
     // `view` is destructured OFF the input before anything else sees it. It is a
     // response-shape knob, not a search facet, and `buildSearchPath` takes the
@@ -441,7 +440,7 @@ export function registerSearchTools(
       if (!doc) {
         throw new Error(
           `homes_search_properties: could not locate JSON-LD on ${path}. ` +
-            `homes.com may have changed their page structure.`
+            `homes.com may have changed their page structure.`,
         );
       }
       const { total, items } = findListings(doc);
@@ -459,8 +458,7 @@ export function registerSearchTools(
       // rendered page is the caller asking for fewer rows, NOT homes.com
       // withholding listings. Using the sliced length here falsely
       // reported truncated:true whenever `limit` < page size.
-      const truncated =
-        typeof total === 'number' && total > rendered.length;
+      const truncated = typeof total === "number" && total > rendered.length;
       const payload: {
         search_path: string;
         total_items: number | undefined;
@@ -475,10 +473,10 @@ export function registerSearchTools(
         truncated,
         results: formatted,
       };
-      if (truncated && typeof total === 'number') {
+      if (truncated && typeof total === "number") {
         payload.total_estimated = total;
       }
       return viewResponse(view, payload);
-    }
+    },
   );
 }

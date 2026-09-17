@@ -1,29 +1,29 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
   withDeadline,
-} from '@chrischall/mcp-utils/fetchproxy';
-import { addressMatch } from '@chrischall/realty-core';
-import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
-import { extractJsonLd, findGraphNode } from '../page-state.js';
-import { locationToSlug } from '../url.js';
+} from "@chrischall/mcp-utils/fetchproxy";
+import { addressMatch } from "@chrischall/realty-core";
+import type { HomesClient } from "../client.js";
+import { minifiedResult } from "../mcp.js";
+import { extractJsonLd, findGraphNode } from "../page-state.js";
+import { locationToSlug } from "../url.js";
 import {
   buildSearchPath,
   findListings,
   extractPropertyId,
   validatePriceBand,
   type JsonLdListingItem,
-} from './search.js';
+} from "./search.js";
 import {
   SMARTSEARCH_AUTOCOMPLETE_PATH,
   buildAutocompleteBody,
   extractAddressCandidates,
   type SmartsearchCandidate,
   type SmartsearchResponse,
-} from './typeahead.js';
+} from "./typeahead.js";
 
 /**
  * `homes_get_by_address` — resolve a free-text address into a canonical
@@ -92,7 +92,7 @@ export interface ByAddressResolved {
    * they got the structured-API match, a precise routing hit, or a
    * corpus-search guess.
    */
-  matched_via: 'typeahead' | 'slug' | 'search_fallback';
+  matched_via: "typeahead" | "slug" | "search_fallback";
 }
 
 export interface ByAddressUnresolved {
@@ -106,7 +106,7 @@ export interface ByAddressUnresolved {
    * this discriminator, which is exactly what produced the false
    * "homes.com zero coverage" conclusion. Absent on a genuine miss.
    */
-  status?: 'timeout';
+  status?: "timeout";
   /** True alongside `status: 'timeout'` — the caller should retry. */
   retryable?: boolean;
 }
@@ -123,16 +123,16 @@ export type ByAddressResult = ByAddressResolved | ByAddressUnresolved;
  * `/126-sleeping-bear-ln-lake-lure-nc-28746/`.
  */
 export function buildAddressSearchPath(input: ByAddressInput): string {
-  const joined = [input.address, input.city, input.state, input.zip ?? '']
+  const joined = [input.address, input.city, input.state, input.zip ?? ""]
     .filter((s) => s && s.trim().length > 0)
-    .join(' ');
+    .join(" ");
   const slug = locationToSlug(joined);
   return `/${slug}/`;
 }
 
 const UNRESOLVED: ByAddressUnresolved = {
   resolved: false,
-  error: 'no listing found',
+  error: "no listing found",
 };
 
 /**
@@ -145,9 +145,9 @@ const UNRESOLVED: ByAddressUnresolved = {
  */
 const BRIDGE_TIMED_OUT: ByAddressUnresolved = {
   resolved: false,
-  status: 'timeout',
+  status: "timeout",
   retryable: true,
-  error: 'bridge timeout — homes.com did not respond; retry',
+  error: "bridge timeout — homes.com did not respond; retry",
 };
 
 /**
@@ -171,7 +171,7 @@ function isBridgeTimeout(err: unknown): boolean {
  */
 interface DirectListing {
   url?: string;
-  '@id'?: string;
+  "@id"?: string;
   mainEntity?: {
     address?: { streetAddress?: string };
   };
@@ -180,7 +180,7 @@ interface DirectListing {
 function asListingItem(listing: DirectListing): JsonLdListingItem {
   return {
     url: listing.url,
-    '@id': listing['@id'],
+    "@id": listing["@id"],
     mainEntity: listing.mainEntity,
   };
 }
@@ -196,10 +196,10 @@ export interface ResolveClient {
   fetchJson?: <T>(
     path: string,
     init?: {
-      method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+      method?: "GET" | "POST" | "PUT" | "DELETE";
       headers?: Record<string, string>;
       body?: unknown;
-    }
+    },
   ) => Promise<T>;
 }
 
@@ -262,7 +262,7 @@ export interface ResolveOneAddressOpts {
 export async function resolveOneAddress(
   client: ResolveClient,
   input: ByAddressInput,
-  opts: ResolveOneAddressOpts = {}
+  opts: ResolveOneAddressOpts = {},
 ): Promise<ByAddressResult> {
   // Validate the optional price band (#46) up front — BEFORE any rung's
   // try/catch — so an invalid band throws a clear "bad input" error
@@ -280,11 +280,11 @@ export async function resolveOneAddress(
 
   // Rung 0: structured smartsearch typeahead (#55) — the primary rung.
   // Routes around the slug rung's URL guessing that 404s real listings.
-  if (typeof client.fetchJson === 'function') {
+  if (typeof client.fetchJson === "function") {
     try {
       const resp = await client.fetchJson<SmartsearchResponse>(
         SMARTSEARCH_AUTOCOMPLETE_PATH,
-        { method: 'POST', body: buildAutocompleteBody(input) }
+        { method: "POST", body: buildAutocompleteBody(input) },
       );
       const match = resolveByTypeahead(resp, input);
       if (match.resolved) return match;
@@ -305,7 +305,7 @@ export async function resolveOneAddress(
   const slugPath = buildAddressSearchPath(input);
   try {
     const html = await client.fetchHtml(slugPath);
-    const slug = resolveListing(html, 'slug');
+    const slug = resolveListing(html, "slug");
     // Apply the #65 whole-token street gate ONLY when the slug result
     // actually carries a street to verify against. A direct detail-page
     // redirect is an unambiguous homes.com hit; its JSON-LD may omit
@@ -315,7 +315,7 @@ export async function resolveOneAddress(
     // populated (collection-page first-item) case #65 targets.
     if (
       slug.resolved &&
-      (slug.street_address === '' ||
+      (slug.street_address === "" ||
         addressMatch(input.address, slug.street_address).matched)
     ) {
       return slug;
@@ -331,7 +331,8 @@ export async function resolveOneAddress(
   // price-bounded result set — narrows the candidate pool the street-token
   // matcher picks from. Omitted band ⇒ unbounded area search (unchanged).
   const fallbackLocation = buildFallbackLocation(input);
-  if (!fallbackLocation) return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
+  if (!fallbackLocation)
+    return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
   const searchPath = buildSearchPath({
     location: fallbackLocation,
     price_min: input.price_min,
@@ -374,9 +375,9 @@ const SINGLE_RESOLVE_DEADLINE_MS = 45_000;
  */
 const TIMED_OUT: ByAddressUnresolved = {
   resolved: false,
-  status: 'timeout',
+  status: "timeout",
   retryable: true,
-  error: 'timeout',
+  error: "timeout",
 };
 
 /**
@@ -395,11 +396,11 @@ export async function resolveOneAddressDeadlined(
   client: ResolveClient,
   input: ByAddressInput,
   deadlineMs: number = SINGLE_RESOLVE_DEADLINE_MS,
-  opts: ResolveOneAddressOpts = {}
+  opts: ResolveOneAddressOpts = {},
 ): Promise<ByAddressResult> {
   const outcome = await withDeadline(
     resolveOneAddress(client, input, opts),
-    deadlineMs
+    deadlineMs,
   );
   return outcome.timedOut ? TIMED_OUT : outcome.value;
 }
@@ -424,21 +425,24 @@ function buildFallbackLocation(input: ByAddressInput): string | null {
 
 export function resolveListing(
   html: string,
-  matchedVia: 'typeahead' | 'slug' | 'search_fallback' = 'slug'
+  matchedVia: "typeahead" | "slug" | "search_fallback" = "slug",
 ): ByAddressResult {
   const doc = extractJsonLd(html);
   if (!doc) return UNRESOLVED;
 
   // Detail-page shape: a single RealEstateListing node in the graph.
-  const direct = findGraphNode(doc, 'RealEstateListing') as DirectListing | null;
+  const direct = findGraphNode(
+    doc,
+    "RealEstateListing",
+  ) as DirectListing | null;
   if (direct) {
     const item = asListingItem(direct);
     const hash = extractPropertyId(item);
     if (hash) {
       return {
-        url: item.url ?? item['@id']?.replace(/[?#].*$/, '') ?? '',
+        url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
         property_hash: hash,
-        street_address: item.mainEntity?.address?.streetAddress ?? '',
+        street_address: item.mainEntity?.address?.streetAddress ?? "",
         resolved: true,
         matched_via: matchedVia,
       };
@@ -451,9 +455,9 @@ export function resolveListing(
     const hash = extractPropertyId(item);
     if (!hash) continue;
     return {
-      url: item.url ?? item['@id']?.replace(/[?#].*$/, '') ?? '',
+      url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
       property_hash: hash,
-      street_address: item.mainEntity?.address?.streetAddress ?? '',
+      street_address: item.mainEntity?.address?.streetAddress ?? "",
       resolved: true,
       matched_via: matchedVia,
     };
@@ -469,7 +473,7 @@ export function resolveListing(
  */
 function resolveBySearchFallback(
   html: string,
-  input: ByAddressInput
+  input: ByAddressInput,
 ): ByAddressResult {
   const doc = extractJsonLd(html);
   if (!doc) return UNRESOLVED;
@@ -495,11 +499,11 @@ function resolveBySearchFallback(
   const hash = extractPropertyId(best.item);
   if (!hash) return UNRESOLVED;
   return {
-    url: best.item.url ?? best.item['@id']?.replace(/[?#].*$/, '') ?? '',
+    url: best.item.url ?? best.item["@id"]?.replace(/[?#].*$/, "") ?? "",
     property_hash: hash,
-    street_address: best.item.mainEntity?.address?.streetAddress ?? '',
+    street_address: best.item.mainEntity?.address?.streetAddress ?? "",
     resolved: true,
-    matched_via: 'search_fallback',
+    matched_via: "search_fallback",
   };
 }
 
@@ -516,7 +520,7 @@ function resolveBySearchFallback(
  */
 function resolveByTypeahead(
   resp: SmartsearchResponse | null | undefined,
-  input: ByAddressInput
+  input: ByAddressInput,
 ): ByAddressResult {
   const candidates = extractAddressCandidates(resp);
   if (candidates.length === 0) return UNRESOLVED;
@@ -529,7 +533,7 @@ function resolveByTypeahead(
     // `street` (+ explicit `unit`), falling back to the display name. The
     // display already folds in the unit.
     const candidateLine = c.street
-      ? `${c.street} ${c.unit ?? ''}`.trim()
+      ? `${c.street} ${c.unit ?? ""}`.trim()
       : c.display;
 
     // Unit guard (layered ON TOP of the matcher). If the input names a
@@ -552,15 +556,15 @@ function resolveByTypeahead(
 
   if (!best) return UNRESOLVED;
   const c = best.candidate;
-  const street = c.street ?? c.display.split(',')[0] ?? '';
+  const street = c.street ?? c.display.split(",")[0] ?? "";
   return {
-    url: c.url.startsWith('http')
-      ? c.url.replace(/[?#].*$/, '')
-      : `https://www.homes.com${c.url.replace(/[?#].*$/, '')}`,
+    url: c.url.startsWith("http")
+      ? c.url.replace(/[?#].*$/, "")
+      : `https://www.homes.com${c.url.replace(/[?#].*$/, "")}`,
     property_hash: c.property_hash,
     street_address: street,
     resolved: true,
-    matched_via: 'typeahead',
+    matched_via: "typeahead",
   };
 }
 
@@ -571,53 +575,53 @@ function resolveByTypeahead(
  * collapsing onto the wrong unit.
  */
 function unitToken(line: string): string | null {
-  const m = line.match(/(?:\b(?:unit|apt|apartment|ste|suite|no)\b\.?\s*|#\s*)([a-z0-9-]+)/i);
+  const m = line.match(
+    /(?:\b(?:unit|apt|apartment|ste|suite|no)\b\.?\s*|#\s*)([a-z0-9-]+)/i,
+  );
   return m ? m[1].toLowerCase() : null;
 }
 
 export function registerByAddressTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_get_by_address',
+    "homes_get_by_address",
     {
-      title: 'Resolve a street address to a homes.com property URL',
+      title: "Resolve a street address to a homes.com property URL",
       description:
         "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Optional `price_min` / `price_max` (USD) bound ONLY the city/zip search-fallback rung — when an address is ambiguous or the typeahead misses and you know the listing's rough price, this narrows the area search (homes.com `?price-min=`/`?price-max=` filter) so the fuzzy matcher picks from fewer, more-relevant candidates; omit for unchanged unbounded behaviour. Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Resolve a street address to a homes.com property URL',
+        title: "Resolve a street address to a homes.com property URL",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         address: z
           .string()
           .describe('Street address (e.g. "126 Sleeping Bear Ln").'),
         city: z.string().describe('City (e.g. "Lake Lure").'),
-        state: z
-          .string()
-          .describe('2-letter US state code (e.g. "NC").'),
+        state: z.string().describe('2-letter US state code (e.g. "NC").'),
         zip: z
           .string()
           .optional()
-          .describe('ZIP code (optional; improves precision when present).'),
+          .describe("ZIP code (optional; improves precision when present)."),
         price_min: z
           .number()
           .nonnegative()
           .optional()
           .describe(
-            "Optional lower price bound (USD). Applied ONLY to the city/zip search-fallback rung — bounds that area search with homes.com's `?price-min=` filter so an ambiguous address resolves against a narrower candidate set. Ignored by the typeahead/slug rungs (a single known address has nothing to narrow). Omit for unbounded fallback. Must be <= price_max when both are given."
+            "Optional lower price bound (USD). Applied ONLY to the city/zip search-fallback rung — bounds that area search with homes.com's `?price-min=` filter so an ambiguous address resolves against a narrower candidate set. Ignored by the typeahead/slug rungs (a single known address has nothing to narrow). Omit for unbounded fallback. Must be <= price_max when both are given.",
           ),
         price_max: z
           .number()
           .nonnegative()
           .optional()
           .describe(
-            "Optional upper price bound (USD). Applied ONLY to the search-fallback rung (homes.com's `?price-max=` filter). Useful when an address is ambiguous or the typeahead misses and you know the listing's rough price — improves disambiguation/recall. Omit for unbounded fallback."
+            "Optional upper price bound (USD). Applied ONLY to the search-fallback rung (homes.com's `?price-max=` filter). Useful when an address is ambiguous or the typeahead misses and you know the listing's rough price — improves disambiguation/recall. Omit for unbounded fallback.",
           ),
-      },
+      }),
     },
     async (input) =>
       // #54: cap the whole single-address resolution (slug rung +
@@ -626,6 +630,6 @@ export function registerByAddressTools(
       // homes.com fetch returns a clean { resolved: false, error:
       // 'timeout' } instead of wedging the connection until the client
       // tears it down with a -32001.
-      minifiedResult(await resolveOneAddressDeadlined(client, input))
+      minifiedResult(await resolveOneAddressDeadlined(client, input)),
   );
 }

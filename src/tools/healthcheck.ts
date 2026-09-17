@@ -1,10 +1,10 @@
 import {
   registerBridgeHealthcheckTool,
   withDeadline,
-} from '@chrischall/mcp-utils/fetchproxy';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { HomesClient } from '../client.js';
-import { FetchproxyTimeoutError } from '../transport-fetchproxy.js';
+} from "@chrischall/mcp-utils/fetchproxy";
+import type { McpServer } from "@modelcontextprotocol/server";
+import type { HomesClient } from "../client.js";
+import { FetchproxyTimeoutError } from "../transport-fetchproxy.js";
 
 /**
  * `homes_healthcheck` — round-trip a no-op request through the full bridge
@@ -46,8 +46,8 @@ import { FetchproxyTimeoutError } from '../transport-fetchproxy.js';
  * `probe.elapsed_ms` carries the timing.
  */
 
-const PROBE_PATH = '/robots.txt';
-const HOST_LABEL = 'www.homes.com';
+const PROBE_PATH = "/robots.txt";
+const HOST_LABEL = "www.homes.com";
 
 /**
  * Hard probe deadline for `homes_healthcheck` (#66).
@@ -72,11 +72,11 @@ const PROBE_DEADLINE_S = Math.round(HEALTHCHECK_PROBE_DEADLINE_MS / 1000);
 
 export function registerHealthcheckTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   registerBridgeHealthcheckTool({
     server,
-    prefix: 'homes',
+    prefix: "homes",
     probePath: PROBE_PATH,
     hostLabel: HOST_LABEL,
     // The tool layer holds the client, whose transport is private; the
@@ -95,7 +95,7 @@ export function registerHealthcheckTools(
       // open-&-interact hint below fires.
       const outcome = await withDeadline(
         client.fetchHtml(path),
-        HEALTHCHECK_PROBE_DEADLINE_MS
+        HEALTHCHECK_PROBE_DEADLINE_MS,
       );
       if (outcome.timedOut) {
         const { role, port } = client.bridgeStatus();
@@ -122,8 +122,8 @@ export function registerHealthcheckTools(
     classifyThrown: (err) => {
       if (!(err instanceof FetchproxyTimeoutError)) return undefined;
       const { state } = client.bridgeStatus().session;
-      if (state === 'linked' || state === 'not_listening') return undefined;
-      return { kind: 'session_not_ready' };
+      if (state === "linked" || state === "not_listening") return undefined;
+      return { kind: "session_not_ready" };
     },
     // homes-specific copy for the arms whose shared default is too generic
     // for this portal. The other arms (`session_not_ready` — pair code /

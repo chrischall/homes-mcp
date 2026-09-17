@@ -1,10 +1,10 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { extractImgTags } from '@chrischall/mcp-utils/fetchproxy';
-import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
-import { lastPathSegment } from '../jsonld.js';
-import { fetchListingRecord } from './properties.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { extractImgTags } from "@chrischall/mcp-utils/fetchproxy";
+import type { HomesClient } from "../client.js";
+import { minifiedResult } from "../mcp.js";
+import { lastPathSegment } from "../jsonld.js";
+import { fetchListingRecord } from "./properties.js";
 
 // Re-exported (via @chrischall/mcp-utils/fetchproxy) so tests/tools/photos.test.ts (and any
 // other caller importing from this module) keep their import path unchanged.
@@ -49,14 +49,14 @@ export interface FormattedPhoto {
  * first occurrence.
  */
 export function pickListingPhotos(
-  imgs: Array<{ src: string; alt?: string }>
+  imgs: Array<{ src: string; alt?: string }>,
 ): Array<{ src: string; alt?: string }> {
   const seen = new Set<string>();
   const out: Array<{ src: string; alt?: string }> = [];
   for (const img of imgs) {
-    if (!img.src.includes('homes.com')) continue;
+    if (!img.src.includes("homes.com")) continue;
     // Skip obvious data: / SVG-inline / blank images.
-    if (img.src.startsWith('data:')) continue;
+    if (img.src.startsWith("data:")) continue;
     if (seen.has(img.src)) continue;
     seen.add(img.src);
     out.push(img);
@@ -66,27 +66,27 @@ export function pickListingPhotos(
 
 export function registerPhotosTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_get_property_photos',
+    "homes_get_property_photos",
     {
-      title: 'Get homes.com property photo gallery',
+      title: "Get homes.com property photo gallery",
       description:
         "The full photo gallery for a homes.com listing. homes.com's JSON-LD only exposes one primary image, so this tool scrapes every <img> tag on the property detail page and filters to the homes.com CDN. Pass `url` — the full homes.com property URL or path (e.g. from a homes_search_properties result's `url` field). Returns `{ property_id, url, count, photos: [{ url, position, alt? }] }`. Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Get homes.com property photo gallery',
+        title: "Get homes.com property photo gallery",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         url: z
           .string()
           .describe(
-            'homes.com property detail URL or path. Required — pass the `url` field from a homes_search_properties result.'
+            "homes.com property detail URL or path. Required — pass the `url` field from a homes_search_properties result.",
           ),
-      },
+      }),
     },
     async ({ url }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
@@ -101,11 +101,11 @@ export function registerPhotosTools(
       // #realestatelisting fragment). `lastPathSegment` strips the
       // #fragment and ?query before taking the last path segment.
       return minifiedResult({
-        property_id: lastPathSegment(listing.url ?? listing['@id'] ?? ''),
-        url: listing.url ?? listing['@id'] ?? '',
+        property_id: lastPathSegment(listing.url ?? listing["@id"] ?? ""),
+        url: listing.url ?? listing["@id"] ?? "",
         count: photos.length,
         photos,
       });
-    }
+    },
   );
 }

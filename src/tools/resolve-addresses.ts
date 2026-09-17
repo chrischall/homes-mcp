@@ -1,17 +1,14 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
   retryOnceOnTimeout,
   withDeadline,
-} from '@chrischall/mcp-utils/fetchproxy';
-import type { HomesClient } from '../client.js';
-import { minifiedResult } from '../mcp.js';
-import {
-  resolveOneAddress,
-  type ByAddressInput,
-} from './by-address.js';
+} from "@chrischall/mcp-utils/fetchproxy";
+import type { HomesClient } from "../client.js";
+import { minifiedResult } from "../mcp.js";
+import { resolveOneAddress, type ByAddressInput } from "./by-address.js";
 
 /**
  * Overall deadline for a whole `homes_resolve_addresses` fan-out (#54).
@@ -55,7 +52,7 @@ const DISPATCH_PACING_MS = 150;
  * retry the pending rows in a follow-up batch rather than treating them
  * as "not on homes.com".
  */
-type RowStatus = 'resolved' | 'unresolved' | 'pending';
+type RowStatus = "resolved" | "unresolved" | "pending";
 
 interface ResolveRow extends ByAddressInput {
   resolved: boolean;
@@ -63,7 +60,7 @@ interface ResolveRow extends ByAddressInput {
   url?: string;
   property_id?: string;
   street_address?: string;
-  matched_via?: 'typeahead' | 'slug' | 'search_fallback';
+  matched_via?: "typeahead" | "slug" | "search_fallback";
   error?: string;
 }
 
@@ -76,26 +73,26 @@ interface ResolveRow extends ByAddressInput {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     const t = setTimeout(resolve, ms);
-    if (typeof t === 'object' && typeof t.unref === 'function') t.unref();
+    if (typeof t === "object" && typeof t.unref === "function") t.unref();
   });
 
 export function registerResolveAddressesTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_resolve_addresses',
+    "homes_resolve_addresses",
     {
-      title: 'Bulk-resolve street addresses to homes.com property URLs',
+      title: "Bulk-resolve street addresses to homes.com property URLs",
       description:
         "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
       annotations: {
-        title: 'Bulk-resolve street addresses to homes.com property URLs',
+        title: "Bulk-resolve street addresses to homes.com property URLs",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         addresses: z
           .array(
             z
@@ -107,14 +104,14 @@ export function registerResolveAddressesTools(
                 price_min: z.number().nonnegative().optional(),
                 price_max: z.number().nonnegative().optional(),
               })
-              .passthrough()
+              .passthrough(),
           )
           .min(1)
           .max(MAX_ADDRESSES)
           .describe(
-            `Array of address records to resolve (1–${MAX_ADDRESSES} per call). Each must include street \`address\`, \`city\`, and 2-letter \`state\`; \`zip\` is optional but improves precision. Optional per-row \`price_min\` / \`price_max\` (USD) bound that row's city/zip search-fallback rung — same semantics as \`homes_get_by_address\` (must be non-negative, min <= max; an invalid band fails only that row).`
+            `Array of address records to resolve (1–${MAX_ADDRESSES} per call). Each must include street \`address\`, \`city\`, and 2-letter \`state\`; \`zip\` is optional but improves precision. Optional per-row \`price_min\` / \`price_max\` (USD) bound that row's city/zip search-fallback rung — same semantics as \`homes_get_by_address\` (must be non-negative, min <= max; an invalid band fails only that row).`,
           ),
-      },
+      }),
     },
     async ({ addresses }) => {
       const ts = addresses as ByAddressInput[];
@@ -131,8 +128,8 @@ export function registerResolveAddressesTools(
       const rows: ResolveRow[] = ts.map((input) => ({
         ...input,
         resolved: false,
-        status: 'pending',
-        error: 'timeout',
+        status: "pending",
+        error: "timeout",
       }));
 
       // Resolve one address into its row slot. `resolveOneAddress` owns
@@ -156,13 +153,13 @@ export function registerResolveAddressesTools(
         const input = ts[index];
         try {
           const result = await retryOnceOnTimeout(() =>
-            resolveOneAddress(client, input, { rethrowBridgeErrors: true })
+            resolveOneAddress(client, input, { rethrowBridgeErrors: true }),
           );
           rows[index] = result.resolved
             ? {
                 ...input,
                 resolved: true,
-                status: 'resolved',
+                status: "resolved",
                 url: result.url,
                 property_id: result.property_hash,
                 street_address: result.street_address,
@@ -171,14 +168,14 @@ export function registerResolveAddressesTools(
             : {
                 ...input,
                 resolved: false,
-                status: 'unresolved',
+                status: "unresolved",
                 error: result.error,
               };
         } catch (e) {
           rows[index] = {
             ...input,
             resolved: false,
-            status: 'unresolved',
+            status: "unresolved",
             error: classifyRowError(e).message,
           };
         }
@@ -213,7 +210,7 @@ export function registerResolveAddressesTools(
           }
         };
         await Promise.all(
-          Array.from({ length: poolSize }, (_, i) => worker(i))
+          Array.from({ length: poolSize }, (_, i) => worker(i)),
         );
       })();
 
@@ -223,6 +220,6 @@ export function registerResolveAddressesTools(
         count: rows.length,
         results: rows,
       });
-    }
+    },
   );
 }

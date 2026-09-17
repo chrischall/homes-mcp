@@ -1,18 +1,18 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
   mapWithConcurrency,
   retryOnceOnTimeout,
-} from '@chrischall/mcp-utils/fetchproxy';
-import type { HomesClient } from '../client.js';
-import { viewArg, viewResponse } from '../view.js';
+} from "@chrischall/mcp-utils/fetchproxy";
+import type { HomesClient } from "../client.js";
+import { viewArg, viewResponse } from "../view.js";
 import {
   fetchListingRecord,
   format,
   type FormattedProperty,
-} from './properties.js';
+} from "./properties.js";
 
 /**
  * Fetch + align N homes.com properties for side-by-side comparison.
@@ -42,22 +42,22 @@ interface SummaryRow {
 }
 
 const SUMMARY_FIELDS: Array<keyof FormattedProperty> = [
-  'address',
-  'city',
-  'state',
-  'zip',
-  'price',
-  'beds',
-  'baths',
-  'sqft',
-  'lot_size_sqft',
-  'lot_size_acres',
-  'year_built',
-  'status',
-  'hoa_fee',
-  'hoa_monthly_usd',
-  'days_on_market',
-  'price_drop_amount',
+  "address",
+  "city",
+  "state",
+  "zip",
+  "price",
+  "beds",
+  "baths",
+  "sqft",
+  "lot_size_sqft",
+  "lot_size_acres",
+  "year_built",
+  "status",
+  "hoa_fee",
+  "hoa_monthly_usd",
+  "days_on_market",
+  "price_drop_amount",
 ];
 
 export function buildSummary(rows: CompareRow[]): SummaryRow[] {
@@ -66,28 +66,28 @@ export function buildSummary(rows: CompareRow[]): SummaryRow[] {
     values: rows.map((r) =>
       r.property
         ? ((r.property as unknown as Record<string, unknown>)[field] ?? null)
-        : null
+        : null,
     ),
   }));
 }
 
 export function registerCompareTools(
   server: McpServer,
-  client: HomesClient
+  client: HomesClient,
 ): void {
   server.registerTool(
-    'homes_compare_properties',
+    "homes_compare_properties",
     {
-      title: 'Compare homes.com properties side-by-side',
+      title: "Compare homes.com properties side-by-side",
       description:
         "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, `lot_size_sqft` + the derived `lot_size_acres`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
       annotations: {
-        title: 'Compare homes.com properties side-by-side',
+        title: "Compare homes.com properties side-by-side",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: true,
       },
-      inputSchema: {
+      inputSchema: z.object({
         view: viewArg(),
         targets: z
           .array(
@@ -96,29 +96,29 @@ export function registerCompareTools(
                 url: z
                   .string()
                   .describe(
-                    'homes.com property URL or path. Required per target — pass the `url` field from a homes_search_properties result.'
+                    "homes.com property URL or path. Required per target — pass the `url` field from a homes_search_properties result.",
                   ),
               })
-              .passthrough()
+              .passthrough(),
           )
           .min(2)
           .max(8)
-          .describe('Array of 2–8 properties to compare'),
+          .describe("Array of 2–8 properties to compare"),
         include_description: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            'When true, include the raw listing `description` marketing prose on each per-property record. Default false.'
+            "When true, include the raw listing `description` marketing prose on each per-property record. Default false.",
           ),
         include_summary: z
           .boolean()
           .optional()
           .default(false)
           .describe(
-            'When true, also emit a cross-row `summary` table aligned by field. Default false — the per-row records already carry every summary field, so the table is redundant context weight unless explicitly requested (#18).'
+            "When true, also emit a cross-row `summary` table aligned by field. Default false — the per-row records already carry every summary field, so the table is redundant context weight unless explicitly requested (#18).",
           ),
-      },
+      }),
     },
     async ({ targets, include_description, include_summary, view }) => {
       const ts = targets as CompareTarget[];
@@ -133,7 +133,7 @@ export function registerCompareTools(
         async (t) => {
           try {
             const { listing, html } = await retryOnceOnTimeout(() =>
-              fetchListingRecord(client, t)
+              fetchListingRecord(client, t),
             );
             const formatted = format(listing, html, {
               includeDescription: include_description,
@@ -149,7 +149,7 @@ export function registerCompareTools(
               error: classifyRowError(e).message,
             };
           }
-        }
+        },
       );
       const payload: {
         count: number;
@@ -163,6 +163,6 @@ export function registerCompareTools(
         payload.summary = buildSummary(rows);
       }
       return viewResponse(view, payload);
-    }
+    },
   );
 }

@@ -1,11 +1,11 @@
-import { z } from 'zod';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   calculateAffordability,
   type AffordabilityInput,
   type AffordabilityResult,
-} from '@chrischall/realty-core';
-import { minifiedResult } from '../mcp.js';
+} from "@chrischall/realty-core";
+import { minifiedResult } from "../mcp.js";
 
 /**
  * Local-only affordability calculator. Solves for max home price under
@@ -17,25 +17,25 @@ import { minifiedResult } from '../mcp.js';
  * existing call sites + tests are unchanged.
  */
 export function computeAffordability(
-  input: AffordabilityInput
+  input: AffordabilityInput,
 ): AffordabilityResult {
   return calculateAffordability(input);
 }
 
 export function registerAffordabilityTools(server: McpServer): void {
   server.registerTool(
-    'homes_calculate_affordability',
+    "homes_calculate_affordability",
     {
-      title: 'Calculate maximum home price you can afford',
+      title: "Calculate maximum home price you can afford",
       description:
-        'Solve for the maximum home price you can afford under the standard 28/36 DTI rule. Inputs: monthly income, recurring monthly debts (car/student loans), down payment, interest rate, optional property-tax rate / insurance / HOA / loan term. Output: max home price, binding constraint (front-end vs back-end), and the PITI breakdown at that price. Identical math to zillow-mcp and redfin-mcp. No network — pure local math.',
+        "Solve for the maximum home price you can afford under the standard 28/36 DTI rule. Inputs: monthly income, recurring monthly debts (car/student loans), down payment, interest rate, optional property-tax rate / insurance / HOA / loan term. Output: max home price, binding constraint (front-end vs back-end), and the PITI breakdown at that price. Identical math to zillow-mcp and redfin-mcp. No network — pure local math.",
       annotations: {
-        title: 'Calculate maximum home price you can afford',
+        title: "Calculate maximum home price you can afford",
         readOnlyHint: true,
         idempotentHint: true,
         openWorldHint: false,
       },
-      inputSchema: {
+      inputSchema: z.object({
         monthly_income: z.number().positive(),
         monthly_debts: z.number().nonnegative().optional(),
         down_payment: z.number().nonnegative(),
@@ -46,8 +46,8 @@ export function registerAffordabilityTools(server: McpServer): void {
         hoa_monthly: z.number().nonnegative().optional(),
         front_end_dti: z.number().min(0).max(1).optional(),
         back_end_dti: z.number().min(0).max(1).optional(),
-      },
+      }),
     },
-    async (i) => minifiedResult(computeAffordability(i))
+    async (i) => minifiedResult(computeAffordability(i)),
   );
 }
