@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/chrischall/homes-mcp/compare/v2.0.0...v2.1.0) (2026-09-19)
+
+
+### Features
+
+* **deps:** take mcp-utils 1.0.0, fixing server/discover ([#224](https://github.com/chrischall/homes-mcp/issues/224)) ([761b123](https://github.com/chrischall/homes-mcp/commit/761b123f4f992917648d38b5666ff6597d3f5c33))
+
 ## [2.0.0](https://github.com/chrischall/homes-mcp/compare/v1.4.5...v2.0.0) (2026-09-17)
 
 
