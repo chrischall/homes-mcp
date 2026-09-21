@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/chrischall/homes-mcp/compare/v2.1.0...v2.1.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **deps:** bump zod in the production-dependencies group ([#228](https://github.com/chrischall/homes-mcp/issues/228)) ([eaf712f](https://github.com/chrischall/homes-mcp/commit/eaf712fc2d25e4660aa72ccd39fe0a49c2533cf8))
+
 ## [2.1.0](https://github.com/chrischall/homes-mcp/compare/v2.0.0...v2.1.0) (2026-09-19)
 
 
