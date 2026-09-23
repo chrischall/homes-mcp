@@ -148,6 +148,32 @@ describe('FetchproxyTransport', () => {
     });
   });
 
+  it('requestJson forwards retryOnTimeout for a read-only POST', async () => {
+    const t = new FetchproxyTransport({ version: '0.0.0' });
+    const inner = stubInner();
+    inner.requestJson.mockResolvedValue({
+      data: {},
+      result: { status: 200, body: '{}', url: 'https://www.homes.com/api' },
+    });
+    installInner(t, inner);
+
+    await t.requestJson({ path: '/search', method: 'POST', body: {}, retryOnTimeout: true });
+    expect(inner.requestJson.mock.calls[0][2].retryOnTimeout).toBe(true);
+  });
+
+  it('requestJson does NOT set retryOnTimeout when the caller omits it (writes are sent once)', async () => {
+    const t = new FetchproxyTransport({ version: '0.0.0' });
+    const inner = stubInner();
+    inner.requestJson.mockResolvedValue({
+      data: {},
+      result: { status: 200, body: '{}', url: 'https://www.homes.com/api' },
+    });
+    installInner(t, inner);
+
+    await t.requestJson({ path: '/save', method: 'POST', body: {} });
+    expect(inner.requestJson.mock.calls[0][2]).not.toHaveProperty('retryOnTimeout');
+  });
+
   it('requestJson passes data: null through (204)', async () => {
     const t = new FetchproxyTransport({ version: '0.0.0' });
     const inner = stubInner();

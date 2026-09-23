@@ -146,9 +146,14 @@ export class FetchproxyTransport implements HomesTransport {
     // homes.com-specific throwIfNotOk / throwIfSignInPage guards over `result`.
     // homes's interface carries the method/path inside the init object; map
     // that onto the adapter's positional (method, path, init) signature.
+    // `retryOnTimeout` is forwarded only when the caller set it, so a write
+    // keeps fetchproxy 3.2.0's send-once default.
     return this.inner.requestJson<T>(init.method, init.path, {
       headers: init.headers,
       body: init.body,
+      ...(init.retryOnTimeout !== undefined
+        ? { retryOnTimeout: init.retryOnTimeout }
+        : {}),
     });
   }
 

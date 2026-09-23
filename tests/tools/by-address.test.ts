@@ -824,6 +824,9 @@ describe('homes_get_by_address tool', () => {
       );
       expect(init.method).toBe('POST');
       expect(init.body.term).toBe('126 sleeping bear ln lake lure nc 28746');
+      // The typeahead is a read-only POST, so it opts into fetchproxy
+      // 3.2.0's cold-start timeout retry (writes are never re-sent).
+      expect(init.retryOnTimeout).toBe(true);
     });
 
     it('CRITICAL #55: resolves 158 Raven Blvd to its real /property/<slug>/<hash>/ URL', async () => {
