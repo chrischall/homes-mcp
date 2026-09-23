@@ -46,6 +46,13 @@ export interface JsonRequestInit {
   headers?: Record<string, string>;
   /** Raw request body. The transport `JSON.stringify`s it; GETs omit it. */
   body?: unknown;
+  /**
+   * Re-send once after a bridge timeout (fetchproxy >= 3.2.0). Omit it to keep
+   * the default: GETs retry, POST/PUT/DELETE are sent exactly once. Set `true`
+   * ONLY for a read that uses POST (e.g. the smartsearch typeahead) — never for
+   * a write, which could be duplicated.
+   */
+  retryOnTimeout?: boolean;
 }
 
 /**

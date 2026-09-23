@@ -199,6 +199,7 @@ export interface ResolveClient {
       method?: "GET" | "POST" | "PUT" | "DELETE";
       headers?: Record<string, string>;
       body?: unknown;
+      retryOnTimeout?: boolean;
     },
   ) => Promise<T>;
 }
@@ -284,7 +285,13 @@ export async function resolveOneAddress(
     try {
       const resp = await client.fetchJson<SmartsearchResponse>(
         SMARTSEARCH_AUTOCOMPLETE_PATH,
-        { method: "POST", body: buildAutocompleteBody(input) },
+        // Read-only typeahead POST: safe to re-send after a cold-bridge
+        // timeout, so opt into fetchproxy 3.2.0's retry (writes never do).
+        {
+          method: "POST",
+          body: buildAutocompleteBody(input),
+          retryOnTimeout: true,
+        },
       );
       const match = resolveByTypeahead(resp, input);
       if (match.resolved) return match;

@@ -105,6 +105,8 @@ export class HomesClient {
       method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
       headers?: Record<string, string>;
       body?: unknown;
+      /** Opt a read-only POST into the bridge's timeout retry. Never set it for a write. */
+      retryOnTimeout?: boolean;
     } = {}
   ): Promise<T> {
     const method = init.method ?? 'POST';
@@ -113,6 +115,9 @@ export class HomesClient {
       method,
       headers: init.headers,
       body: init.body,
+      ...(init.retryOnTimeout !== undefined
+        ? { retryOnTimeout: init.retryOnTimeout }
+        : {}),
     });
     this.throwIfNotOk(result, method, path);
     this.throwIfSignInPage(result);
