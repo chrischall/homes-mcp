@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.3](https://github.com/chrischall/homes-mcp/compare/v2.1.2...v2.1.3) (2026-09-23)
+
+
+### Bug Fixes
+
+* correct rent-vs-buy math, stop post-deadline traffic, and surface WAF blocks in address resolution ([#233](https://github.com/chrischall/homes-mcp/issues/233)) ([4443e29](https://github.com/chrischall/homes-mcp/commit/4443e290eb77771a9361eedd4ecd0016615934c2))
+
+
+### Documentation
+
+* document blocked status for homes_get_by_address and homes_resolve_addresses ([#236](https://github.com/chrischall/homes-mcp/issues/236)) ([884da58](https://github.com/chrischall/homes-mcp/commit/884da58987aa460339a5cdcb5f6af5c060583dad)), closes [#234](https://github.com/chrischall/homes-mcp/issues/234)
+
 ## [2.1.2](https://github.com/chrischall/homes-mcp/compare/v2.1.1...v2.1.2) (2026-09-23)
 
 
