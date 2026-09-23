@@ -12,7 +12,11 @@ import {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
 } from '@fetchproxy/server';
-import type { HomesClient } from '../../src/client.js';
+import {
+  HomesHttpError,
+  SessionNotAuthenticatedError,
+  type HomesClient,
+} from '../../src/client.js';
 import {
   buildAddressSearchPath,
   registerByAddressTools,
@@ -31,7 +35,7 @@ interface ByAddressResolved {
 interface ByAddressUnresolved {
   resolved: false;
   error: string;
-  status?: 'timeout';
+  status?: 'timeout' | 'blocked';
   retryable?: boolean;
 }
 
@@ -1074,6 +1078,75 @@ describe('homes_get_by_address tool', () => {
         expect(parsed.status).toBe('timeout');
         expect(parsed.retryable).toBe(true);
       }
+    });
+
+    it('surfaces status: blocked (not "no listing found") when homes.com returns a sign-in / WAF challenge (chrischall/fleet-audit#133)', async () => {
+      const waf = () => {
+        const e = new SessionNotAuthenticatedError('Homes.com', 'homes.com');
+        e.message += ' An AWS WAF challenge interstitial was returned.';
+        return e;
+      };
+      mockFetchJson.mockReset();
+      mockFetchJson.mockImplementation(async () => {
+        throw waf();
+      });
+      mockFetchHtml.mockImplementation(async () => {
+        throw waf();
+      });
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '219 Picnic Point',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(false);
+      if (!parsed.resolved) {
+        expect(parsed.status).toBe('blocked');
+        expect(parsed.retryable).toBe(true);
+        expect(parsed.error).toMatch(/WAF/);
+        expect(parsed.error).not.toBe('no listing found');
+      }
+    });
+
+    it('surfaces status: blocked on HTTP 403 / 429 from homes.com (chrischall/fleet-audit#133)', async () => {
+      for (const status of [403, 429]) {
+        mockFetchJson.mockReset();
+        mockFetchJson.mockResolvedValue({ suggestions: { places: [] } });
+        mockFetchHtml.mockReset();
+        mockFetchHtml.mockImplementation(async (path: string) => {
+          throw new HomesHttpError(status, `homes.com error: ${status} for GET ${path}`);
+        });
+        const r = await harness.callTool('homes_get_by_address', {
+          address: '219 Picnic Point',
+          city: 'Lake Lure',
+          state: 'NC',
+          zip: '28746',
+        });
+        const parsed = parseToolResult<ByAddressResult>(r);
+        expect(parsed.resolved).toBe(false);
+        if (!parsed.resolved) {
+          expect(parsed.status).toBe('blocked');
+          expect(parsed.error).toMatch(new RegExp(String(status)));
+        }
+      }
+    });
+
+    it('a 404 from the slug rung is still a genuine miss, not a block', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockResolvedValue({ suggestions: { places: [] } });
+      mockFetchHtml.mockReset();
+      mockFetchHtml.mockImplementation(async (path: string) => {
+        throw new HomesHttpError(404, `homes.com error: 404 for GET ${path}`);
+      });
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '999 Nowhere St',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
     });
 
     it('still reports a GENUINE miss as "no listing found" (no status) when every rung returns empty', async () => {

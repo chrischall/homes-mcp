@@ -10,6 +10,7 @@ import type { HomesClient } from "../client.js";
 import { minifiedResult } from "../mcp.js";
 import {
   ResolveAbortedError,
+  isBlockedError,
   resolveOneAddress,
   type ByAddressInput,
 } from "./by-address.js";
@@ -56,7 +57,7 @@ const DISPATCH_PACING_MS = 150;
  * retry the pending rows in a follow-up batch rather than treating them
  * as "not on homes.com".
  */
-type RowStatus = "resolved" | "unresolved" | "pending";
+type RowStatus = "resolved" | "unresolved" | "pending" | "blocked";
 
 interface ResolveRow extends ByAddressInput {
   resolved: boolean;
@@ -89,7 +90,7 @@ export function registerResolveAddressesTools(
     {
       title: "Bulk-resolve street addresses to homes.com property URLs",
       description:
-        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
+        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Each row's `status` is `resolved`, `unresolved`, `pending` (deadline reached — retry it) or `blocked` (homes.com returned a sign-in / AWS WAF challenge or HTTP 403/429 — not a miss; clear the challenge in the browser and retry). Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Bulk-resolve street addresses to homes.com property URLs",
         readOnlyHint: true,
@@ -192,7 +193,8 @@ export function registerResolveAddressesTools(
           rows[index] = {
             ...input,
             resolved: false,
-            status: "unresolved",
+            // #133: a sign-in / WAF challenge / 403 / 429 is not a miss.
+            status: isBlockedError(e) ? "blocked" : "unresolved",
             error: classifyRowError(e).message,
           };
         }
