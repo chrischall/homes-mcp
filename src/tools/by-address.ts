@@ -264,9 +264,10 @@ export interface ResolveClient {
  *      whole-token-matches the input (#65) — a guessed slug that routes
  *      to a city collection whose first listing is a DIFFERENT street
  *      would otherwise mask the verified search-fallback. The gate is
- *      applied ONLY when a street is present: a direct detail-page hit
- *      whose JSON-LD omits `streetAddress` is an unambiguous homes.com
- *      resolution with nothing to verify against, so it is accepted.
+ *      waived ONLY for a direct detail-page hit whose JSON-LD omits
+ *      `streetAddress` — an unambiguous homes.com resolution with
+ *      nothing to verify against. A collection first item with no
+ *      street is unverified and falls through (#134).
  *   2. **Search-fallback rung (#47).** When the rungs above return no
  *      listing (404, empty collection, no JSON-LD), fall through to
  *      the city/zip search page (the same path shape `search.ts`
@@ -395,18 +396,19 @@ export async function resolveOneAddress(
   throwIfAborted(opts.signal);
   try {
     const html = await client.fetchHtml(slugPath);
-    const slug = resolveListing(html, "slug");
-    // Apply the #65 whole-token street gate ONLY when the slug result
-    // actually carries a street to verify against. A direct detail-page
-    // redirect is an unambiguous homes.com hit; its JSON-LD may omit
-    // `streetAddress` (→ `street_address === ''`), and we can't falsify a
-    // match we have nothing to compare to. Gating those out would drop a
-    // valid hit, so accept the empty-street case and keep the gate for the
-    // populated (collection-page first-item) case #65 targets.
+    const { result: slug, shape } = parseSlugPage(html, "slug");
+    // Apply the #65 whole-token street gate. The ONE exemption: a direct
+    // detail-page redirect is an unambiguous homes.com hit whose JSON-LD
+    // may omit `streetAddress` (→ `street_address === ''`); there is
+    // nothing to falsify, so it is accepted. A collection page's first
+    // item with no street (land lots, community cards) is NOT unambiguous
+    // — it is an unverified guess and must fall through to the verified
+    // search-fallback (chrischall/fleet-audit#134).
     if (
       slug.resolved &&
-      (slug.street_address === "" ||
-        addressMatch(input.address, slug.street_address).matched)
+      ((shape === "direct" && slug.street_address === "") ||
+        (slug.street_address !== "" &&
+          addressMatch(input.address, slug.street_address).matched))
     ) {
       return slug;
     }
@@ -529,8 +531,21 @@ export function resolveListing(
   html: string,
   matchedVia: "typeahead" | "slug" | "search_fallback" = "slug",
 ): ByAddressResult {
+  return parseSlugPage(html, matchedVia).result;
+}
+
+/**
+ * `resolveListing` plus which page shape produced the hit: `'direct'`
+ * (a single RealEstateListing detail page — homes.com resolved the slug
+ * unambiguously) or `'collection'` (the first item of a CollectionPage —
+ * a guess that needs verifying). `shape` is null on a miss.
+ */
+function parseSlugPage(
+  html: string,
+  matchedVia: "typeahead" | "slug" | "search_fallback",
+): { result: ByAddressResult; shape: "direct" | "collection" | null } {
   const doc = extractJsonLd(html);
-  if (!doc) return UNRESOLVED;
+  if (!doc) return { result: UNRESOLVED, shape: null };
 
   // Detail-page shape: a single RealEstateListing node in the graph.
   const direct = findGraphNode(
@@ -542,11 +557,14 @@ export function resolveListing(
     const hash = extractPropertyId(item);
     if (hash) {
       return {
-        url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
-        property_hash: hash,
-        street_address: item.mainEntity?.address?.streetAddress ?? "",
-        resolved: true,
-        matched_via: matchedVia,
+        result: {
+          url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
+          property_hash: hash,
+          street_address: item.mainEntity?.address?.streetAddress ?? "",
+          resolved: true,
+          matched_via: matchedVia,
+        },
+        shape: "direct",
       };
     }
   }
@@ -557,15 +575,18 @@ export function resolveListing(
     const hash = extractPropertyId(item);
     if (!hash) continue;
     return {
-      url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
-      property_hash: hash,
-      street_address: item.mainEntity?.address?.streetAddress ?? "",
-      resolved: true,
-      matched_via: matchedVia,
+      result: {
+        url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
+        property_hash: hash,
+        street_address: item.mainEntity?.address?.streetAddress ?? "",
+        resolved: true,
+        matched_via: matchedVia,
+      },
+      shape: "collection",
     };
   }
 
-  return UNRESOLVED;
+  return { result: UNRESOLVED, shape: null };
 }
 
 /**

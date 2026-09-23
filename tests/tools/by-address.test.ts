@@ -559,6 +559,33 @@ describe('homes_get_by_address tool', () => {
       });
     });
 
+    it('does not accept an unverifiable collection first item with no street (chrischall/fleet-audit#134)', async () => {
+      // The guessed slug routed to an area collection whose first card (a
+      // land lot / new-construction community) has no streetAddress. That
+      // is NOT an unambiguous homes.com hit — it must fall through to the
+      // verified search-fallback instead of resolving to the wrong listing.
+      const noStreet = {
+        ...itemFor('wronglot', ''),
+        mainEntity: { address: { addressLocality: 'Lake Lure' } },
+      };
+      mockFetchHtml.mockResolvedValueOnce(collectionHtml([noStreet]));
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('rightstreet', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.property_hash).toBe('rightstreet');
+        expect(parsed.matched_via).toBe('search_fallback');
+      }
+    });
+
     it('#65 (populated): still falls through to search-fallback when the slug street is present but MISMATCHED', async () => {
       // The street-match gate must remain in force when a street IS present:
       // a populated-but-wrong slug street must NOT short-circuit the verified
