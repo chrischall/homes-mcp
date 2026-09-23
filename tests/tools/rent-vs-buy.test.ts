@@ -19,19 +19,59 @@ describe('estimateRentVsBuy', () => {
     expect(r.horizon_years).toBe(7);
   });
 
-  it('pre-sale year-1 buy outflow covers down + closing + at least PITI*12', () => {
-    // horizon=2 so cumulative_buy_cost[0] is the gross year-1 outflow
-    // (sale proceeds only net out at the horizon year).
-    const r = estimateRentVsBuy({
-      home_price: 500000,
-      down_payment: 100000,
+  it('break_even_year does not depend on the chosen horizon (chrischall/fleet-audit#129)', () => {
+    const base = {
+      home_price: 400000,
+      down_payment: 80000,
       interest_rate: 6.5,
       monthly_rent: 2500,
-      horizon_years: 2,
-      closing_cost_rate: 2.5,
+    };
+    const years = [7, 10, 15].map(
+      (horizon_years) => estimateRentVsBuy({ ...base, horizon_years }).break_even_year,
+    );
+    expect(years[0]).not.toBeNull();
+    expect(years[0]).toBeLessThan(7);
+    expect(new Set(years).size).toBe(1);
+  });
+
+  it('cumulative_buy_cost is a continuous net series, with no drop at the horizon year', () => {
+    const r7 = estimateRentVsBuy({
+      home_price: 400000,
+      down_payment: 80000,
+      interest_rate: 6.5,
+      monthly_rent: 2500,
+      horizon_years: 7,
     });
-    // year 1 outflow >= down (100k) + closing (12.5k) + 12 months of P&I (~$30k)
-    expect(r.cumulative_buy_cost[0]).toBeGreaterThan(100000 + 12000);
+    const r10 = estimateRentVsBuy({
+      home_price: 400000,
+      down_payment: 80000,
+      interest_rate: 6.5,
+      monthly_rent: 2500,
+      horizon_years: 10,
+    });
+    // The first 7 years must be identical whatever the horizon.
+    expect(r10.cumulative_buy_cost.slice(0, 7)).toEqual(r7.cumulative_buy_cost);
+    expect(r10.cumulative_rent_cost.slice(0, 7)).toEqual(r7.cumulative_rent_cost);
+  });
+
+  it('stops charging P&I once the loan term ends (chrischall/fleet-audit#130)', () => {
+    const r = estimateRentVsBuy({
+      home_price: 400000,
+      down_payment: 80000,
+      interest_rate: 6.5,
+      monthly_rent: 2500,
+      loan_term_years: 15,
+      horizon_years: 30,
+    });
+    // Annual P&I on a $320k 15y loan at 6.5% is ~$33.4k. After payoff the
+    // year-over-year growth in the buyer's net cost must not include it:
+    // the step from year 16 to 17 is only tax + maintenance (~$17k at a
+    // ~$640k home) minus appreciation equity gained.
+    const step = r.cumulative_buy_cost[16] - r.cumulative_buy_cost[15];
+    expect(step).toBeLessThan(20000);
+    // And the step in the last loan year does include P&I.
+    const loanStep = r.cumulative_buy_cost[14] - r.cumulative_buy_cost[13];
+    expect(loanStep).toBeGreaterThan(step);
   });
 
   it('finds a finite break_even_year when buying eventually wins', () => {

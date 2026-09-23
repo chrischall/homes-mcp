@@ -6,7 +6,11 @@ import {
   withDeadline,
 } from "@chrischall/mcp-utils/fetchproxy";
 import { addressMatch } from "@chrischall/realty-core";
-import type { HomesClient } from "../client.js";
+import {
+  HomesHttpError,
+  SessionNotAuthenticatedError,
+  type HomesClient,
+} from "../client.js";
 import { minifiedResult } from "../mcp.js";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
 import { locationToSlug } from "../url.js";
@@ -50,9 +54,11 @@ import {
  *     `homes_get_property`.
  *
  * **Graceful degradation.** When no listing is found — empty results,
- * missing JSON-LD (404-style page), or any error from the transport
- * (non-2xx, sign-in interstitial, transport failure) — we return
- * `{ resolved: false, error: 'no listing found' }` instead of throwing.
+ * missing JSON-LD (404-style page), or a generic transport error — we
+ * return `{ resolved: false, error: 'no listing found' }` instead of
+ * throwing. A bridge timeout or a homes.com block (sign-in / WAF
+ * challenge, HTTP 403/429) is not a miss and returns a retryable
+ * `status: 'timeout'` / `'blocked'` instead.
  * The unified caller fans out to multiple sites in parallel and needs
  * per-site failures to be partial, not fatal.
  */
@@ -106,8 +112,11 @@ export interface ByAddressUnresolved {
    * this discriminator, which is exactly what produced the false
    * "homes.com zero coverage" conclusion. Absent on a genuine miss.
    */
-  status?: "timeout";
-  /** True alongside `status: 'timeout'` — the caller should retry. */
+  status?: "timeout" | "blocked";
+  /**
+   * True alongside `status: 'timeout'` / `'blocked'` — the caller should
+   * retry (after clearing the challenge / signing in, for `'blocked'`).
+   */
   retryable?: boolean;
 }
 
@@ -149,6 +158,37 @@ const BRIDGE_TIMED_OUT: ByAddressUnresolved = {
   retryable: true,
   error: "bridge timeout — homes.com did not respond; retry",
 };
+
+/**
+ * True when homes.com refused to answer rather than having no listing:
+ * a sign-in redirect / AWS WAF challenge interstitial
+ * (`SessionNotAuthenticatedError`, thrown by the client) or an HTTP
+ * 403 / 429. Like a bridge timeout, that is NOT a confirmed coverage
+ * gap, so it must never collapse onto `'no listing found'`
+ * (chrischall/fleet-audit#133).
+ */
+export function isBlockedError(err: unknown): boolean {
+  return (
+    err instanceof SessionNotAuthenticatedError ||
+    (err instanceof HomesHttpError && (err.status === 403 || err.status === 429))
+  );
+}
+
+/**
+ * Outcome when every rung missed and at least one was blocked by
+ * homes.com. The message carries the client's sign-in / WAF guidance.
+ */
+function blockedResult(err: unknown): ByAddressUnresolved {
+  const detail = err instanceof Error ? err.message : String(err);
+  return {
+    resolved: false,
+    status: "blocked",
+    retryable: true,
+    error:
+      `homes.com blocked the request (sign-in, AWS WAF challenge or rate limit) — ` +
+      `not a confirmed miss. Open homes.com in your browser, clear any challenge, then retry. ${detail}`,
+  };
+}
 
 /**
  * True for the two fetchproxy transport-failure errors that mean
@@ -224,9 +264,10 @@ export interface ResolveClient {
  *      whole-token-matches the input (#65) — a guessed slug that routes
  *      to a city collection whose first listing is a DIFFERENT street
  *      would otherwise mask the verified search-fallback. The gate is
- *      applied ONLY when a street is present: a direct detail-page hit
- *      whose JSON-LD omits `streetAddress` is an unambiguous homes.com
- *      resolution with nothing to verify against, so it is accepted.
+ *      waived ONLY for a direct detail-page hit whose JSON-LD omits
+ *      `streetAddress` — an unambiguous homes.com resolution with
+ *      nothing to verify against. A collection first item with no
+ *      street is unverified and falls through (#134).
  *   2. **Search-fallback rung (#47).** When the rungs above return no
  *      listing (404, empty collection, no JSON-LD), fall through to
  *      the city/zip search page (the same path shape `search.ts`
@@ -237,7 +278,7 @@ export interface ResolveClient {
  * Single- and bulk-address tools MUST go through this helper so a
  * future change to the resolution strategy lands in both at once.
  *
- * Error taxonomy. Non-2xx / sign-in interstitials / generic transport
+ * Error taxonomy. Non-2xx (other than 403/429) / generic transport
  * errors (`Error('network down')`-style) at any rung are caught and
  * surfaced as the graceful `'no listing found'` outcome (#45) — the
  * unified canonical-URL caller treats the row as "not on this site"
@@ -248,6 +289,10 @@ export interface ResolveClient {
  * call surfaces a retryable `status: 'timeout'` sentinel instead of
  * `'no listing found'`. A timeout in one rung never masks a genuine
  * resolve in a later rung — only an all-miss outcome is downgraded.
+ * A sign-in / AWS WAF challenge (`SessionNotAuthenticatedError`) or an
+ * HTTP 403/429 is handled the same way but reported as the retryable
+ * `status: 'blocked'`, which takes precedence over `'timeout'` (#133);
+ * `rethrowBridgeErrors` rethrows it too.
  *
  * Bulk callers can additionally opt into `rethrowBridgeErrors: true` to
  * have those same bridge timeouts RETHROWN immediately rather than
@@ -258,6 +303,25 @@ export interface ResolveClient {
  */
 export interface ResolveOneAddressOpts {
   rethrowBridgeErrors?: boolean;
+  /**
+   * Aborted when the caller has stopped waiting (its deadline fired).
+   * Checked before every rung, so an abandoned resolution sends no more
+   * requests through the user's browser tab (chrischall/fleet-audit#132).
+   * An aborted call rejects with {@link ResolveAbortedError}.
+   */
+  signal?: AbortSignal;
+}
+
+/** Thrown by `resolveOneAddress` when `opts.signal` is aborted. */
+export class ResolveAbortedError extends Error {
+  constructor() {
+    super("address resolution abandoned after the deadline");
+    this.name = "ResolveAbortedError";
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new ResolveAbortedError();
 }
 
 export async function resolveOneAddress(
@@ -279,9 +343,27 @@ export async function resolveOneAddress(
   // sentinel — a cold-bridge timeout is not a confirmed coverage gap.
   let sawBridgeTimeout = false;
 
+  // Same idea for a homes.com block (#133): a sign-in / WAF challenge or
+  // HTTP 403/429 in any rung means we never saw an answer. Bulk callers
+  // (`rethrowBridgeErrors`) get the error rethrown so the row is labelled;
+  // otherwise it's remembered and wins over the miss / timeout outcomes.
+  let blockedErr: unknown = undefined;
+  const noteBlocked = (err: unknown): void => {
+    if (!isBlockedError(err)) return;
+    if (opts.rethrowBridgeErrors) throw err;
+    blockedErr ??= err;
+  };
+  const missed = (): ByAddressUnresolved =>
+    blockedErr !== undefined
+      ? blockedResult(blockedErr)
+      : sawBridgeTimeout
+        ? BRIDGE_TIMED_OUT
+        : UNRESOLVED;
+
   // Rung 0: structured smartsearch typeahead (#55) — the primary rung.
   // Routes around the slug rung's URL guessing that 404s real listings.
   if (typeof client.fetchJson === "function") {
+    throwIfAborted(opts.signal);
     try {
       const resp = await client.fetchJson<SmartsearchResponse>(
         SMARTSEARCH_AUTOCOMPLETE_PATH,
@@ -298,6 +380,7 @@ export async function resolveOneAddress(
     } catch (err) {
       if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
       if (isBridgeTimeout(err)) sawBridgeTimeout = true;
+      noteBlocked(err);
       // Fall through to the slug rung.
     }
   }
@@ -310,26 +393,29 @@ export async function resolveOneAddress(
   // the (verified) search-fallback rung instead of returning the wrong
   // listing.
   const slugPath = buildAddressSearchPath(input);
+  throwIfAborted(opts.signal);
   try {
     const html = await client.fetchHtml(slugPath);
-    const slug = resolveListing(html, "slug");
-    // Apply the #65 whole-token street gate ONLY when the slug result
-    // actually carries a street to verify against. A direct detail-page
-    // redirect is an unambiguous homes.com hit; its JSON-LD may omit
-    // `streetAddress` (→ `street_address === ''`), and we can't falsify a
-    // match we have nothing to compare to. Gating those out would drop a
-    // valid hit, so accept the empty-street case and keep the gate for the
-    // populated (collection-page first-item) case #65 targets.
+    const { result: slug, shape } = parseSlugPage(html, "slug");
+    // Apply the #65 whole-token street gate. The ONE exemption: a direct
+    // detail-page redirect is an unambiguous homes.com hit whose JSON-LD
+    // may omit `streetAddress` (→ `street_address === ''`); there is
+    // nothing to falsify, so it is accepted. A collection page's first
+    // item with no street (land lots, community cards) is NOT unambiguous
+    // — it is an unverified guess and must fall through to the verified
+    // search-fallback (chrischall/fleet-audit#134).
     if (
       slug.resolved &&
-      (slug.street_address === "" ||
-        addressMatch(input.address, slug.street_address).matched)
+      ((shape === "direct" && slug.street_address === "") ||
+        (slug.street_address !== "" &&
+          addressMatch(input.address, slug.street_address).matched))
     ) {
       return slug;
     }
   } catch (err) {
     if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
     if (isBridgeTimeout(err)) sawBridgeTimeout = true;
+    noteBlocked(err);
     // Fall through to the search rung.
   }
 
@@ -338,25 +424,26 @@ export async function resolveOneAddress(
   // price-bounded result set — narrows the candidate pool the street-token
   // matcher picks from. Omitted band ⇒ unbounded area search (unchanged).
   const fallbackLocation = buildFallbackLocation(input);
-  if (!fallbackLocation)
-    return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
+  if (!fallbackLocation) return missed();
   const searchPath = buildSearchPath({
     location: fallbackLocation,
     price_min: input.price_min,
     price_max: input.price_max,
   });
+  throwIfAborted(opts.signal);
   try {
     const html = await client.fetchHtml(searchPath);
     const fallback = resolveBySearchFallback(html, input);
     if (fallback.resolved) return fallback;
     // Search page came back but had no fuzzy match. If an EARLIER rung
-    // timed out on the bridge, this "empty" search page can't downgrade
-    // a genuine-unknown to a confirmed miss — keep the timeout taxonomy.
-    return sawBridgeTimeout ? BRIDGE_TIMED_OUT : fallback;
+    // timed out on the bridge or was blocked, this "empty" search page
+    // can't downgrade a genuine-unknown to a confirmed miss.
+    return blockedErr !== undefined || sawBridgeTimeout ? missed() : fallback;
   } catch (err) {
     if (opts.rethrowBridgeErrors && isBridgeTimeout(err)) throw err;
     if (isBridgeTimeout(err)) sawBridgeTimeout = true;
-    return sawBridgeTimeout ? BRIDGE_TIMED_OUT : UNRESOLVED;
+    noteBlocked(err);
+    return missed();
   }
 }
 
@@ -405,11 +492,21 @@ export async function resolveOneAddressDeadlined(
   deadlineMs: number = SINGLE_RESOLVE_DEADLINE_MS,
   opts: ResolveOneAddressOpts = {},
 ): Promise<ByAddressResult> {
-  const outcome = await withDeadline(
-    resolveOneAddress(client, input, opts),
-    deadlineMs,
-  );
-  return outcome.timedOut ? TIMED_OUT : outcome.value;
+  // Abort on timeout so the abandoned resolution stops before its next
+  // rung instead of carrying on in the background (#132).
+  const controller = new AbortController();
+  const pending = resolveOneAddress(client, input, {
+    ...opts,
+    signal: controller.signal,
+  });
+  // The abandoned promise rejects with ResolveAbortedError; nobody awaits it.
+  pending.catch(() => {});
+  const outcome = await withDeadline(pending, deadlineMs);
+  if (outcome.timedOut) {
+    controller.abort();
+    return TIMED_OUT;
+  }
+  return outcome.value;
 }
 
 /**
@@ -434,8 +531,21 @@ export function resolveListing(
   html: string,
   matchedVia: "typeahead" | "slug" | "search_fallback" = "slug",
 ): ByAddressResult {
+  return parseSlugPage(html, matchedVia).result;
+}
+
+/**
+ * `resolveListing` plus which page shape produced the hit: `'direct'`
+ * (a single RealEstateListing detail page — homes.com resolved the slug
+ * unambiguously) or `'collection'` (the first item of a CollectionPage —
+ * a guess that needs verifying). `shape` is null on a miss.
+ */
+function parseSlugPage(
+  html: string,
+  matchedVia: "typeahead" | "slug" | "search_fallback",
+): { result: ByAddressResult; shape: "direct" | "collection" | null } {
   const doc = extractJsonLd(html);
-  if (!doc) return UNRESOLVED;
+  if (!doc) return { result: UNRESOLVED, shape: null };
 
   // Detail-page shape: a single RealEstateListing node in the graph.
   const direct = findGraphNode(
@@ -447,11 +557,14 @@ export function resolveListing(
     const hash = extractPropertyId(item);
     if (hash) {
       return {
-        url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
-        property_hash: hash,
-        street_address: item.mainEntity?.address?.streetAddress ?? "",
-        resolved: true,
-        matched_via: matchedVia,
+        result: {
+          url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
+          property_hash: hash,
+          street_address: item.mainEntity?.address?.streetAddress ?? "",
+          resolved: true,
+          matched_via: matchedVia,
+        },
+        shape: "direct",
       };
     }
   }
@@ -462,15 +575,18 @@ export function resolveListing(
     const hash = extractPropertyId(item);
     if (!hash) continue;
     return {
-      url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
-      property_hash: hash,
-      street_address: item.mainEntity?.address?.streetAddress ?? "",
-      resolved: true,
-      matched_via: matchedVia,
+      result: {
+        url: item.url ?? item["@id"]?.replace(/[?#].*$/, "") ?? "",
+        property_hash: hash,
+        street_address: item.mainEntity?.address?.streetAddress ?? "",
+        resolved: true,
+        matched_via: matchedVia,
+      },
+      shape: "collection",
     };
   }
 
-  return UNRESOLVED;
+  return { result: UNRESOLVED, shape: null };
 }
 
 /**
@@ -597,7 +713,7 @@ export function registerByAddressTools(
     {
       title: "Resolve a street address to a homes.com property URL",
       description:
-        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Optional `price_min` / `price_max` (USD) bound ONLY the city/zip search-fallback rung — when an address is ambiguous or the typeahead misses and you know the listing's rough price, this narrows the area search (homes.com `?price-min=`/`?price-max=` filter) so the fuzzy matcher picks from fewer, more-relevant candidates; omit for unchanged unbounded behaviour. Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
+        "Resolve a US street address to its canonical homes.com property URL + opaque property hash. Pass `address` (street), `city`, `state`, and optional `zip`. Walks three rungs: first the structured smartsearch typeahead (POST /routes/res/consumer/smartsearch/autocomplete/ — the primary rung, the same address-suggest API homes.com's search box fires, returning the real /property/<slug>/<hash>/ URL directly), then a slug-routed page (parsing the embedded Schema.org JSON-LD — both the CollectionPage search-results shape and the single-RealEstateListing detail redirect), and finally a city/zip search page with street-token fuzzy match. Every candidate is verified against the input with a whole-token street match (plus a unit guard so a multi-unit building resolves to the exact unit, not a neighbour). Optional `price_min` / `price_max` (USD) bound ONLY the city/zip search-fallback rung — when an address is ambiguous or the typeahead misses and you know the listing's rough price, this narrows the area search (homes.com `?price-min=`/`?price-max=` filter) so the fuzzy matcher picks from fewer, more-relevant candidates; omit for unchanged unbounded behaviour. Returns `{ url, property_hash, street_address, matched_via, resolved: true }` on success — `matched_via` is `'typeahead'` for the structured-API hit, `'slug'` for a direct routing hit, `'search_fallback'` for the search-page fuzzy match — or `{ resolved: false, error: 'no listing found' }` when homes.com has no match (so the higher-level unified canonical-URL lookup can degrade gracefully). A retryable `{ resolved: false, status: 'timeout' | 'blocked', retryable: true }` means homes.com never answered (bridge timeout) or refused (sign-in / AWS WAF challenge / HTTP 403-429) — NOT a confirmed miss; for `blocked`, have the user open homes.com and clear the challenge, then retry. KNOWN FAILURE MODE: rural addresses and very-new construction can still miss because homes.com hasn't indexed them yet. Compare the returned `street_address` against your input to confirm. For larger batches (≥ 3 addresses), prefer `homes_resolve_addresses`. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Resolve a street address to a homes.com property URL",
         readOnlyHint: true,

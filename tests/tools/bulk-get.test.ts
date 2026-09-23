@@ -302,6 +302,41 @@ describe('homes_bulk_get', () => {
       await dh.close();
     }, 5000);
 
+    it('stops dispatching queued URLs once the deadline fires (chrischall/fleet-audit#131)', async () => {
+      const dh = await createTestHarness((server) =>
+        registerBulkGetTools(server, mockClient, FAST_TUNING)
+      );
+      // 20 URLs, each fetch takes 150ms, concurrency 6, deadline 200ms:
+      // wave 1 (6) runs 0-150ms, wave 2 (6) is dispatched at 150ms and is
+      // still in flight when the deadline fires. Nothing after that may be
+      // fetched — the caller has already been told those rows are pending.
+      mockFetchHtml.mockImplementation(
+        (path: string) =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  htmlWith({
+                    '@type': ['RealEstateListing', 'Product'],
+                    url: `https://www.homes.com${path}`,
+                    offers: { price: 1 },
+                    mainEntity: { address: { streetAddress: '1 Main St' } },
+                  })
+                ),
+              150
+            )
+          )
+      );
+      const urls = Array.from({ length: 20 }, (_, i) => `/property/x/u${i}/`);
+      const r = await dh.callTool('homes_bulk_get', { urls });
+      const parsed = parseToolResult<{ pending?: number }>(r);
+      expect(parsed.pending).toBeGreaterThan(0);
+      // Let any abandoned runners drain.
+      await new Promise((res) => setTimeout(res, 700));
+      expect(mockFetchHtml.mock.calls.length).toBeLessThanOrEqual(12);
+      await dh.close();
+    }, 5000);
+
     it('all rows resolving before the deadline → no pending marker', async () => {
       const dh = await createTestHarness((server) =>
         registerBulkGetTools(server, mockClient, FAST_TUNING)

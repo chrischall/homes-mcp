@@ -35,6 +35,21 @@ import type {
 // (`throwIfSignInPage`) when the WAF signal is what tripped.
 export { SessionNotAuthenticatedError };
 
+/**
+ * Non-2xx response from homes.com. Carries the HTTP `status` so callers
+ * can tell a block (403 / 429 — WAF or rate limit) from a genuine miss
+ * (404) without parsing the message (chrischall/fleet-audit#133).
+ */
+export class HomesHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'HomesHttpError';
+    this.status = status;
+  }
+}
+
 export interface HomesClientOptions {
   /** Transport used to relay fetches to the user's browser. */
   transport: HomesTransport;
@@ -134,7 +149,8 @@ export class HomesClient {
       ? result.body.replace(/\s+/g, ' ').trim()
       : '';
     const bodyPreview = collapsed ? ` — ${truncateErrorMessage(collapsed)}` : '';
-    throw new Error(
+    throw new HomesHttpError(
+      result.status,
       `homes.com error: ${result.status} for ${method} ${path}${bodyPreview}`
     );
   }

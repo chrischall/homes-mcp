@@ -71,6 +71,12 @@ interface BulkRow {
   error?: string;
 }
 
+function throwIfDeadlinePassed(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("bulk_get overall deadline reached; row not fetched");
+  }
+}
+
 export function registerBulkGetTools(
   server: McpServer,
   client: HomesClient,
@@ -129,10 +135,17 @@ export function registerBulkGetTools(
       //     wide batch doesn't tip the bridge into timeouts (round-3 #78).
       const rows = await runBoundedBatch<string, BulkRow>(
         urls,
-        async (url) => {
-          const { listing, html } = await retryOnceOnTimeout(() =>
-            fetchListingRecord(client, { url }),
-          );
+        async (url, signal) => {
+          // runBoundedBatch aborts `signal` when the deadline fires, but its
+          // runners keep dequeuing (mcp-utils <= 2.4.0). Bail before any
+          // request — and before the timeout retry — so the rows already
+          // reported `pending` don't keep hitting homes.com through the
+          // user's browser tab after the call has returned
+          // (chrischall/fleet-audit#131).
+          const { listing, html } = await retryOnceOnTimeout(() => {
+            throwIfDeadlinePassed(signal);
+            return fetchListingRecord(client, { url });
+          });
           const formatted = format(listing, html, {
             includeDescription: include_description,
           });

@@ -8,7 +8,12 @@ import {
 } from "@chrischall/mcp-utils/fetchproxy";
 import type { HomesClient } from "../client.js";
 import { minifiedResult } from "../mcp.js";
-import { resolveOneAddress, type ByAddressInput } from "./by-address.js";
+import {
+  ResolveAbortedError,
+  isBlockedError,
+  resolveOneAddress,
+  type ByAddressInput,
+} from "./by-address.js";
 
 /**
  * Overall deadline for a whole `homes_resolve_addresses` fan-out (#54).
@@ -52,7 +57,7 @@ const DISPATCH_PACING_MS = 150;
  * retry the pending rows in a follow-up batch rather than treating them
  * as "not on homes.com".
  */
-type RowStatus = "resolved" | "unresolved" | "pending";
+type RowStatus = "resolved" | "unresolved" | "pending" | "blocked";
 
 interface ResolveRow extends ByAddressInput {
   resolved: boolean;
@@ -85,7 +90,7 @@ export function registerResolveAddressesTools(
     {
       title: "Bulk-resolve street addresses to homes.com property URLs",
       description:
-        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
+        "Resolve up to 100 street addresses to canonical homes.com property URLs + opaque property hashes in one call. Pass `addresses: [{ address, city, state, zip? }, ...]`. Fans out to the same rungs `homes_get_by_address` runs (structured smartsearch typeahead → slug → city/zip search fallback), verifying each candidate with the same whole-token street + unit match. Per-row outcomes parallel `homes_get_by_address` (with `property_hash` renamed to `property_id` here so the field name lines up with `homes_bulk_get`): `{ resolved: true, url, property_id, street_address, matched_via }` on success — `matched_via` is `'typeahead'`, `'slug'`, or `'search_fallback'` — `{ resolved: false, error }` otherwise; one bad row won't fail the whole call. Each row's `status` is `resolved`, `unresolved`, `pending` (deadline reached — retry it) or `blocked` (homes.com returned a sign-in / AWS WAF challenge or HTTP 403/429 — not a miss; clear the challenge in the browser and retry). Results preserve input order. Use this instead of looping `homes_get_by_address` for any batch ≥ 3. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Bulk-resolve street addresses to homes.com property URLs",
         readOnlyHint: true,
@@ -149,11 +154,21 @@ export function registerResolveAddressesTools(
       //      to the canonical `'no listing found'` sentinel — the
       //      parity contract with the single tool is preserved for
       //      everything except fetchproxy bridge failures.
+      // Aborted when the overall deadline fires: workers stop dequeuing and
+      // every in-flight resolution stops before its next rung, so the rows
+      // already returned as `pending` don't keep generating requests
+      // through the user's browser tab (chrischall/fleet-audit#132).
+      const controller = new AbortController();
+      const { signal } = controller;
+
       const resolveInto = async (index: number): Promise<void> => {
         const input = ts[index];
         try {
           const result = await retryOnceOnTimeout(() =>
-            resolveOneAddress(client, input, { rethrowBridgeErrors: true }),
+            resolveOneAddress(client, input, {
+              rethrowBridgeErrors: true,
+              signal,
+            }),
           );
           rows[index] = result.resolved
             ? {
@@ -172,10 +187,14 @@ export function registerResolveAddressesTools(
                 error: result.error,
               };
         } catch (e) {
+          // Abandoned after the deadline: the response has already been
+          // built from the seeded `pending` row — leave it alone.
+          if (e instanceof ResolveAbortedError) return;
           rows[index] = {
             ...input,
             resolved: false,
-            status: "unresolved",
+            // #133: a sign-in / WAF challenge / 403 / 429 is not a miss.
+            status: isBlockedError(e) ? "blocked" : "unresolved",
             error: classifyRowError(e).message,
           };
         }
@@ -198,7 +217,7 @@ export function registerResolveAddressesTools(
         let nextRefillAt = 0;
         const worker = async (firstIndex: number): Promise<void> => {
           await resolveInto(firstIndex);
-          while (cursor < ts.length) {
+          while (!signal.aborted && cursor < ts.length) {
             const index = cursor++;
             // Stagger refills on a shared clock so freed workers don't
             // all re-dispatch on the same tick.
@@ -206,6 +225,7 @@ export function registerResolveAddressesTools(
             const wait = Math.max(0, nextRefillAt - now);
             nextRefillAt = Math.max(now, nextRefillAt) + DISPATCH_PACING_MS;
             if (wait > 0) await sleep(wait);
+            if (signal.aborted) return;
             await resolveInto(index);
           }
         };
@@ -214,7 +234,8 @@ export function registerResolveAddressesTools(
         );
       })();
 
-      await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
+      const outcome = await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
+      if (outcome.timedOut) controller.abort();
 
       return minifiedResult({
         count: rows.length,

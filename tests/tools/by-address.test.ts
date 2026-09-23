@@ -12,7 +12,11 @@ import {
   FetchproxyBridgeDownError,
   FetchproxyTimeoutError,
 } from '@fetchproxy/server';
-import type { HomesClient } from '../../src/client.js';
+import {
+  HomesHttpError,
+  SessionNotAuthenticatedError,
+  type HomesClient,
+} from '../../src/client.js';
 import {
   buildAddressSearchPath,
   registerByAddressTools,
@@ -31,7 +35,7 @@ interface ByAddressResolved {
 interface ByAddressUnresolved {
   resolved: false;
   error: string;
-  status?: 'timeout';
+  status?: 'timeout' | 'blocked';
   retryable?: boolean;
 }
 
@@ -555,6 +559,33 @@ describe('homes_get_by_address tool', () => {
       });
     });
 
+    it('does not accept an unverifiable collection first item with no street (chrischall/fleet-audit#134)', async () => {
+      // The guessed slug routed to an area collection whose first card (a
+      // land lot / new-construction community) has no streetAddress. That
+      // is NOT an unambiguous homes.com hit — it must fall through to the
+      // verified search-fallback instead of resolving to the wrong listing.
+      const noStreet = {
+        ...itemFor('wronglot', ''),
+        mainEntity: { address: { addressLocality: 'Lake Lure' } },
+      };
+      mockFetchHtml.mockResolvedValueOnce(collectionHtml([noStreet]));
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('rightstreet', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.property_hash).toBe('rightstreet');
+        expect(parsed.matched_via).toBe('search_fallback');
+      }
+    });
+
     it('#65 (populated): still falls through to search-fallback when the slug street is present but MISMATCHED', async () => {
       // The street-match gate must remain in force when a street IS present:
       // a populated-but-wrong slug street must NOT short-circuit the verified
@@ -1076,6 +1107,75 @@ describe('homes_get_by_address tool', () => {
       }
     });
 
+    it('surfaces status: blocked (not "no listing found") when homes.com returns a sign-in / WAF challenge (chrischall/fleet-audit#133)', async () => {
+      const waf = () => {
+        const e = new SessionNotAuthenticatedError('Homes.com', 'homes.com');
+        e.message += ' An AWS WAF challenge interstitial was returned.';
+        return e;
+      };
+      mockFetchJson.mockReset();
+      mockFetchJson.mockImplementation(async () => {
+        throw waf();
+      });
+      mockFetchHtml.mockImplementation(async () => {
+        throw waf();
+      });
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '219 Picnic Point',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(false);
+      if (!parsed.resolved) {
+        expect(parsed.status).toBe('blocked');
+        expect(parsed.retryable).toBe(true);
+        expect(parsed.error).toMatch(/WAF/);
+        expect(parsed.error).not.toBe('no listing found');
+      }
+    });
+
+    it('surfaces status: blocked on HTTP 403 / 429 from homes.com (chrischall/fleet-audit#133)', async () => {
+      for (const status of [403, 429]) {
+        mockFetchJson.mockReset();
+        mockFetchJson.mockResolvedValue({ suggestions: { places: [] } });
+        mockFetchHtml.mockReset();
+        mockFetchHtml.mockImplementation(async (path: string) => {
+          throw new HomesHttpError(status, `homes.com error: ${status} for GET ${path}`);
+        });
+        const r = await harness.callTool('homes_get_by_address', {
+          address: '219 Picnic Point',
+          city: 'Lake Lure',
+          state: 'NC',
+          zip: '28746',
+        });
+        const parsed = parseToolResult<ByAddressResult>(r);
+        expect(parsed.resolved).toBe(false);
+        if (!parsed.resolved) {
+          expect(parsed.status).toBe('blocked');
+          expect(parsed.error).toMatch(new RegExp(String(status)));
+        }
+      }
+    });
+
+    it('a 404 from the slug rung is still a genuine miss, not a block', async () => {
+      mockFetchJson.mockReset();
+      mockFetchJson.mockResolvedValue({ suggestions: { places: [] } });
+      mockFetchHtml.mockReset();
+      mockFetchHtml.mockImplementation(async (path: string) => {
+        throw new HomesHttpError(404, `homes.com error: 404 for GET ${path}`);
+      });
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '999 Nowhere St',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toEqual({ resolved: false, error: 'no listing found' });
+    });
+
     it('still reports a GENUINE miss as "no listing found" (no status) when every rung returns empty', async () => {
       // Typeahead empty (default), slug empty, search-fallback empty —
       // homes.com genuinely has no match. This must stay distinguishable
@@ -1275,6 +1375,29 @@ describe('resolveOneAddressDeadlined', () => {
     if (!result.resolved) {
       expect(result.error).toBe('timeout');
     }
+  });
+
+  it('does not start further rungs after the deadline fires (chrischall/fleet-audit#132)', async () => {
+    // Typeahead takes 20s and returns nothing; the deadline is 10s. The
+    // call has already returned `timeout`, so the slug / search rungs must
+    // never be sent.
+    dlFetchJson.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ suggestions: { places: [] } }), 20_000)
+        )
+    );
+    dlFetchHtml.mockResolvedValue('<html></html>');
+    const p = resolveOneAddressDeadlined(
+      dlClient,
+      { address: '1 Slow Ln', city: 'Atlanta', state: 'GA' },
+      10_000
+    );
+    await vi.advanceTimersByTimeAsync(10_001);
+    const result = await p;
+    expect(result.resolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(dlFetchHtml).not.toHaveBeenCalled();
   });
 
   it('returns the resolved row when the fetch settles before the deadline', async () => {

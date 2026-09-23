@@ -4,6 +4,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   HomesClient,
+  HomesHttpError,
   SessionNotAuthenticatedError,
 } from '../src/client.js';
 import type {
@@ -141,6 +142,20 @@ describe('HomesClient', () => {
       })),
     });
     await expect(client.fetchHtml('/x')).rejects.toThrow(/500/);
+  });
+
+  it('non-2xx errors carry the HTTP status (chrischall/fleet-audit#133)', async () => {
+    const client = new HomesClient({
+      transport: stubTransport(async () => ({
+        status: 429,
+        body: 'slow down',
+        url: 'https://www.homes.com/x',
+      })),
+    });
+    const err = await client.fetchHtml('/x').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HomesHttpError);
+    expect((err as HomesHttpError).status).toBe(429);
+    expect((err as Error).message).toMatch(/429/);
   });
 
   it('redacts Bearer/JWT secrets from the non-2xx error body preview', async () => {

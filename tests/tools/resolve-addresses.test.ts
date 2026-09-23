@@ -8,7 +8,10 @@ import {
   beforeAll,
   afterAll,
 } from 'vitest';
-import type { HomesClient } from '../../src/client.js';
+import {
+  SessionNotAuthenticatedError,
+  type HomesClient,
+} from '../../src/client.js';
 import {
   registerResolveAddressesTools,
   RESOLVE_DEADLINE_MS,
@@ -92,6 +95,23 @@ describe('homes_resolve_addresses', () => {
     expect(parsed.results[0].resolved).toBe(true);
     expect(parsed.results[1].resolved).toBe(false);
     expect(parsed.results[2].resolved).toBe(true);
+  });
+
+  it('labels WAF / sign-in blocked rows as blocked, not "no listing found" (chrischall/fleet-audit#133)', async () => {
+    // One-shot: bulk mode rethrows the block from the first rung.
+    mockFetchHtml.mockImplementationOnce(async () => {
+      throw new SessionNotAuthenticatedError('Homes.com', 'homes.com');
+    });
+    const r = await h.callTool('homes_resolve_addresses', {
+      addresses: [{ address: '1 Main St', city: 'Atlanta', state: 'GA' }],
+    });
+    const parsed = parseToolResult<{
+      results: Array<{ resolved: boolean; status: string; error?: string }>;
+    }>(r);
+    expect(parsed.results[0].resolved).toBe(false);
+    expect(parsed.results[0].status).toBe('blocked');
+    expect(parsed.results[0].error).not.toBe('no listing found');
+    expect(parsed.results[0].error).toMatch(/homes\.com/i);
   });
 
   it('captures transport errors per-row', async () => {
@@ -184,6 +204,27 @@ describe('homes_resolve_addresses overall deadline', () => {
     expect(parsed.results.map((row) => row.address)).toEqual(
       sixty.map((a) => a.address)
     );
+  });
+
+  it('stops resolving once the deadline has returned the pending rows (chrischall/fleet-audit#132)', async () => {
+    // Every fetch takes 30s and misses (no JSON-LD), so each address costs
+    // two rungs = 60s. The first 6 addresses are mid-flight when the 50s
+    // deadline fires; nothing else may be dispatched after that — neither
+    // a queued address nor a later rung of an in-flight one.
+    dlFetchHtml.mockImplementation(
+      () =>
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve('<html></html>'), 30_000)
+        )
+    );
+    const call = dh.callTool('homes_resolve_addresses', { addresses: sixty });
+    await vi.advanceTimersByTimeAsync(RESOLVE_DEADLINE_MS + 1000);
+    await call;
+    const atReturn = dlFetchHtml.mock.calls.length;
+    // Drain every abandoned worker.
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(dlFetchHtml.mock.calls.length).toBe(atReturn);
+    expect(atReturn).toBeLessThanOrEqual(12);
   });
 
   it('keeps rows that resolved before the deadline and marks the rest pending', async () => {
