@@ -1277,6 +1277,29 @@ describe('resolveOneAddressDeadlined', () => {
     }
   });
 
+  it('does not start further rungs after the deadline fires (chrischall/fleet-audit#132)', async () => {
+    // Typeahead takes 20s and returns nothing; the deadline is 10s. The
+    // call has already returned `timeout`, so the slug / search rungs must
+    // never be sent.
+    dlFetchJson.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ suggestions: { places: [] } }), 20_000)
+        )
+    );
+    dlFetchHtml.mockResolvedValue('<html></html>');
+    const p = resolveOneAddressDeadlined(
+      dlClient,
+      { address: '1 Slow Ln', city: 'Atlanta', state: 'GA' },
+      10_000
+    );
+    await vi.advanceTimersByTimeAsync(10_001);
+    const result = await p;
+    expect(result.resolved).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(dlFetchHtml).not.toHaveBeenCalled();
+  });
+
   it('returns the resolved row when the fetch settles before the deadline', async () => {
     dlFetchHtml.mockResolvedValueOnce(
       detailHtmlTop(

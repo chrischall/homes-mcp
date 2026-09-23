@@ -186,6 +186,27 @@ describe('homes_resolve_addresses overall deadline', () => {
     );
   });
 
+  it('stops resolving once the deadline has returned the pending rows (chrischall/fleet-audit#132)', async () => {
+    // Every fetch takes 30s and misses (no JSON-LD), so each address costs
+    // two rungs = 60s. The first 6 addresses are mid-flight when the 50s
+    // deadline fires; nothing else may be dispatched after that — neither
+    // a queued address nor a later rung of an in-flight one.
+    dlFetchHtml.mockImplementation(
+      () =>
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve('<html></html>'), 30_000)
+        )
+    );
+    const call = dh.callTool('homes_resolve_addresses', { addresses: sixty });
+    await vi.advanceTimersByTimeAsync(RESOLVE_DEADLINE_MS + 1000);
+    await call;
+    const atReturn = dlFetchHtml.mock.calls.length;
+    // Drain every abandoned worker.
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(dlFetchHtml.mock.calls.length).toBe(atReturn);
+    expect(atReturn).toBeLessThanOrEqual(12);
+  });
+
   it('keeps rows that resolved before the deadline and marks the rest pending', async () => {
     // First 6 addresses resolve fast; everything else hangs forever.
     dlFetchHtml.mockImplementation((path: string) => {

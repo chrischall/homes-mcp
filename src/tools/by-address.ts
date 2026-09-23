@@ -258,6 +258,25 @@ export interface ResolveClient {
  */
 export interface ResolveOneAddressOpts {
   rethrowBridgeErrors?: boolean;
+  /**
+   * Aborted when the caller has stopped waiting (its deadline fired).
+   * Checked before every rung, so an abandoned resolution sends no more
+   * requests through the user's browser tab (chrischall/fleet-audit#132).
+   * An aborted call rejects with {@link ResolveAbortedError}.
+   */
+  signal?: AbortSignal;
+}
+
+/** Thrown by `resolveOneAddress` when `opts.signal` is aborted. */
+export class ResolveAbortedError extends Error {
+  constructor() {
+    super("address resolution abandoned after the deadline");
+    this.name = "ResolveAbortedError";
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new ResolveAbortedError();
 }
 
 export async function resolveOneAddress(
@@ -282,6 +301,7 @@ export async function resolveOneAddress(
   // Rung 0: structured smartsearch typeahead (#55) — the primary rung.
   // Routes around the slug rung's URL guessing that 404s real listings.
   if (typeof client.fetchJson === "function") {
+    throwIfAborted(opts.signal);
     try {
       const resp = await client.fetchJson<SmartsearchResponse>(
         SMARTSEARCH_AUTOCOMPLETE_PATH,
@@ -310,6 +330,7 @@ export async function resolveOneAddress(
   // the (verified) search-fallback rung instead of returning the wrong
   // listing.
   const slugPath = buildAddressSearchPath(input);
+  throwIfAborted(opts.signal);
   try {
     const html = await client.fetchHtml(slugPath);
     const slug = resolveListing(html, "slug");
@@ -345,6 +366,7 @@ export async function resolveOneAddress(
     price_min: input.price_min,
     price_max: input.price_max,
   });
+  throwIfAborted(opts.signal);
   try {
     const html = await client.fetchHtml(searchPath);
     const fallback = resolveBySearchFallback(html, input);
@@ -405,11 +427,21 @@ export async function resolveOneAddressDeadlined(
   deadlineMs: number = SINGLE_RESOLVE_DEADLINE_MS,
   opts: ResolveOneAddressOpts = {},
 ): Promise<ByAddressResult> {
-  const outcome = await withDeadline(
-    resolveOneAddress(client, input, opts),
-    deadlineMs,
-  );
-  return outcome.timedOut ? TIMED_OUT : outcome.value;
+  // Abort on timeout so the abandoned resolution stops before its next
+  // rung instead of carrying on in the background (#132).
+  const controller = new AbortController();
+  const pending = resolveOneAddress(client, input, {
+    ...opts,
+    signal: controller.signal,
+  });
+  // The abandoned promise rejects with ResolveAbortedError; nobody awaits it.
+  pending.catch(() => {});
+  const outcome = await withDeadline(pending, deadlineMs);
+  if (outcome.timedOut) {
+    controller.abort();
+    return TIMED_OUT;
+  }
+  return outcome.value;
 }
 
 /**

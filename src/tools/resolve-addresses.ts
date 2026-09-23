@@ -8,7 +8,11 @@ import {
 } from "@chrischall/mcp-utils/fetchproxy";
 import type { HomesClient } from "../client.js";
 import { minifiedResult } from "../mcp.js";
-import { resolveOneAddress, type ByAddressInput } from "./by-address.js";
+import {
+  ResolveAbortedError,
+  resolveOneAddress,
+  type ByAddressInput,
+} from "./by-address.js";
 
 /**
  * Overall deadline for a whole `homes_resolve_addresses` fan-out (#54).
@@ -149,11 +153,21 @@ export function registerResolveAddressesTools(
       //      to the canonical `'no listing found'` sentinel — the
       //      parity contract with the single tool is preserved for
       //      everything except fetchproxy bridge failures.
+      // Aborted when the overall deadline fires: workers stop dequeuing and
+      // every in-flight resolution stops before its next rung, so the rows
+      // already returned as `pending` don't keep generating requests
+      // through the user's browser tab (chrischall/fleet-audit#132).
+      const controller = new AbortController();
+      const { signal } = controller;
+
       const resolveInto = async (index: number): Promise<void> => {
         const input = ts[index];
         try {
           const result = await retryOnceOnTimeout(() =>
-            resolveOneAddress(client, input, { rethrowBridgeErrors: true }),
+            resolveOneAddress(client, input, {
+              rethrowBridgeErrors: true,
+              signal,
+            }),
           );
           rows[index] = result.resolved
             ? {
@@ -172,6 +186,9 @@ export function registerResolveAddressesTools(
                 error: result.error,
               };
         } catch (e) {
+          // Abandoned after the deadline: the response has already been
+          // built from the seeded `pending` row — leave it alone.
+          if (e instanceof ResolveAbortedError) return;
           rows[index] = {
             ...input,
             resolved: false,
@@ -198,7 +215,7 @@ export function registerResolveAddressesTools(
         let nextRefillAt = 0;
         const worker = async (firstIndex: number): Promise<void> => {
           await resolveInto(firstIndex);
-          while (cursor < ts.length) {
+          while (!signal.aborted && cursor < ts.length) {
             const index = cursor++;
             // Stagger refills on a shared clock so freed workers don't
             // all re-dispatch on the same tick.
@@ -206,6 +223,7 @@ export function registerResolveAddressesTools(
             const wait = Math.max(0, nextRefillAt - now);
             nextRefillAt = Math.max(now, nextRefillAt) + DISPATCH_PACING_MS;
             if (wait > 0) await sleep(wait);
+            if (signal.aborted) return;
             await resolveInto(index);
           }
         };
@@ -214,7 +232,8 @@ export function registerResolveAddressesTools(
         );
       })();
 
-      await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
+      const outcome = await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
+      if (outcome.timedOut) controller.abort();
 
       return minifiedResult({
         count: rows.length,
