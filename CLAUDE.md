@@ -32,7 +32,7 @@ This is a "Pattern A" fetchproxy MCP (every call rides through fetchproxy), not 
 | `homes_get_history` | `tools/history.ts` | Same SSR detail page — combined price + tax history (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`, `tax_records`). Preferred over the two deprecated split tools. | read |
 | `homes_get_session_context` | `tools/sessions.ts` | (local; shared session registry) — list all registered logical sessions + `active_session_id` | read |
 | `homes_register_session` | `tools/sessions.ts` | (local; shared session registry) — register/refresh a session keyed by `account_identity` (required); optional `auth_expires_at`; `mark_active` (default false) registers-and-activates | write (registry) |
-| `homes_set_active_session` | `tools/sessions.ts` | (local; shared session registry) — switch the active logical session by `session_id` | write (registry) |
+| `homes_set_active_session` | `tools/sessions.ts` | (local; shared session registry) — mark a `session_id` as the current account label (label only; does not change which account requests use) | write (registry) |
 
 ## Architecture
 

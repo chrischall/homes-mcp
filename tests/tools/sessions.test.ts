@@ -134,3 +134,39 @@ describe('homes_set_active_session', () => {
     expect(text).toMatch(/unknown session_id/i);
   });
 });
+
+describe('session tool descriptions (fleet-audit #135)', () => {
+  // Nothing in homes-mcp reads the registry to route requests and no tool
+  // takes a `session_id`: every call goes through whichever browser tab the
+  // fetchproxy extension is bound to. The descriptions must not promise
+  // per-session routing the server does not do.
+  async function descriptions(): Promise<Record<string, string>> {
+    const tools = await h.listTools();
+    return Object.fromEntries(
+      tools
+        .filter((t) => t.name.includes('session'))
+        .map((t) => [t.name, t.description ?? ''])
+    );
+  }
+
+  it('none of the trio claims to route calls or mentions per-tool session_id overrides', async () => {
+    const d = await descriptions();
+    expect(Object.keys(d).sort()).toEqual([
+      'homes_get_session_context',
+      'homes_register_session',
+      'homes_set_active_session',
+    ]);
+    for (const text of Object.values(d)) {
+      expect(text).not.toMatch(/route/i);
+      expect(text).not.toMatch(/override/i);
+    }
+  });
+
+  it('each description says the registry is a label only and does not switch accounts', async () => {
+    const d = await descriptions();
+    for (const text of Object.values(d)) {
+      expect(text).toMatch(/label only/i);
+      expect(text).toMatch(/does not (change|switch) which .*account/i);
+    }
+  });
+});

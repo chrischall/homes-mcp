@@ -77,7 +77,7 @@ you omit it — see [Response shape](#response-shape-view).
 ### Diagnostics & sessions
 
 - **`homes_healthcheck`** — Round-trips `/robots.txt` through the fetchproxy bridge; distinguishes "bridge down" vs "extension not connected / pair code pending" (`bridge.session_state`, `error.kind: session_not_ready`) vs "homes.com-side problem."
-- **`homes_get_session_context`**, **`homes_register_session`**, **`homes_set_active_session`** — List / register / switch logical homes.com sessions.
+- **`homes_get_session_context`**, **`homes_register_session`**, **`homes_set_active_session`** — List / register / switch account *labels* for your own bookkeeping. Label only: switching does not change which account requests use; they always go through whichever account the fetchproxy browser tab is signed into.
 
 ## Response shape (`view`)
 
