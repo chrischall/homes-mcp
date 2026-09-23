@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.4](https://github.com/chrischall/homes-mcp/compare/v2.1.3...v2.1.4) (2026-09-23)
+
+
+### Bug Fixes
+
+* **sessions:** stop session tools claiming they switch which account requests use ([#237](https://github.com/chrischall/homes-mcp/issues/237)) ([c393857](https://github.com/chrischall/homes-mcp/commit/c393857bcad6fae876f0f58fa765ec66658f3ddc))
+
 ## [2.1.3](https://github.com/chrischall/homes-mcp/compare/v2.1.2...v2.1.3) (2026-09-23)
 
 
