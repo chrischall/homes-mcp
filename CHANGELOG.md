@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.2](https://github.com/chrischall/homes-mcp/compare/v2.1.1...v2.1.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **deps:** require zod ^4.6.5 to match @chrischall/mcp-utils 2.4.0 ([#232](https://github.com/chrischall/homes-mcp/issues/232)) ([270190b](https://github.com/chrischall/homes-mcp/commit/270190b0e5f17bd106ddaf85eccbccc46c027078))
+* **deps:** upgrade @chrischall/mcp-utils to 2.4.0 and @fetchproxy/* to 3.2.0 ([#230](https://github.com/chrischall/homes-mcp/issues/230)) ([61478ed](https://github.com/chrischall/homes-mcp/commit/61478edeeba75ec14e0a12aae704a467286118ad))
+
 ## [2.1.1](https://github.com/chrischall/homes-mcp/compare/v2.1.0...v2.1.1) (2026-09-21)
 
 
