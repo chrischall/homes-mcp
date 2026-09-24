@@ -162,14 +162,67 @@ describe('format', () => {
     expect(out.description).toBeUndefined();
     expect(out.date_posted).toBe('2026-05-01T00:00:00Z');
     expect(out.date_modified).toBe('2026-05-20T00:00:00Z');
+    // fleet-audit#1022: agent telephone/email are opt-in — the default
+    // record carries name/job_title/url + brokerage only.
     expect(out.listing_agent).toEqual({
       name: 'Jane Smith',
-      telephone: '+1-404-555-0100',
-      email: 'jane@cb.com',
       job_title: 'Real Estate Agent',
       url: 'https://www.homes.com/agent/jane-smith/',
     });
     expect(out.brokerage).toBe('Coldwell Banker');
+  });
+
+  // fleet-audit#1022: listing-agent contact details are gated behind
+  // includeAgentContact so bulk sweeps don't dump a contact list.
+  describe('listing-agent contact gating (fleet-audit#1022)', () => {
+    const listing = {
+      url: 'https://www.homes.com/property/x/abc/',
+      offers: {
+        offeredBy: [
+          {
+            name: 'Test Agent',
+            telephone: '+1-555-555-0199',
+            email: 'agent@example.com',
+            jobTitle: 'Real Estate Agent',
+            url: 'https://www.homes.com/agent/test-agent/',
+            memberOf: { name: 'Example Realty' },
+          },
+        ],
+      },
+      mainEntity: {},
+    };
+
+    it('omits telephone and email by default', () => {
+      const out = format(listing);
+      expect(out.listing_agent).toEqual({
+        name: 'Test Agent',
+        job_title: 'Real Estate Agent',
+        url: 'https://www.homes.com/agent/test-agent/',
+      });
+      expect(out.brokerage).toBe('Example Realty');
+      expect(JSON.stringify(out)).not.toContain('agent@example.com');
+      expect(JSON.stringify(out)).not.toContain('555-0199');
+    });
+
+    it('includes telephone and email when includeAgentContact is true', () => {
+      const out = format(listing, undefined, { includeAgentContact: true });
+      expect(out.listing_agent).toEqual({
+        name: 'Test Agent',
+        telephone: '+1-555-555-0199',
+        email: 'agent@example.com',
+        job_title: 'Real Estate Agent',
+        url: 'https://www.homes.com/agent/test-agent/',
+      });
+    });
+
+    it('returns undefined when the agent has only contact fields and contact is off', () => {
+      const out = format({
+        url: 'https://www.homes.com/property/x/abc/',
+        offers: { offeredBy: [{ email: 'agent@example.com' }] },
+        mainEntity: {},
+      });
+      expect(out.listing_agent).toBeUndefined();
+    });
   });
 
   it('uses primaryImageOfPage when present', () => {
@@ -288,6 +341,44 @@ describe('homes_get_property tool', () => {
     expect(parsed.price).toBe(1000000);
     expect(parsed.status).toBe('https://schema.org/InStock');
     expect(parsed.lat).toBe(33.7);
+  });
+
+  it('gates listing-agent telephone/email behind include_agent_contact (fleet-audit#1022)', async () => {
+    const listing = {
+      '@type': ['RealEstateListing', 'Product'],
+      url: 'https://www.homes.com/property/foo/abc/',
+      offers: {
+        price: 1000000,
+        offeredBy: [
+          {
+            name: 'Test Agent',
+            telephone: '+1-555-555-0199',
+            email: 'agent@example.com',
+          },
+        ],
+      },
+      mainEntity: {},
+    };
+    mockFetchHtml.mockResolvedValueOnce(htmlWith(listing));
+    const def = parseToolResult<{
+      listing_agent?: Record<string, string>;
+    }>(await harness.callTool('homes_get_property', { url: '/property/foo/abc/' }));
+    expect(def.listing_agent).toEqual({ name: 'Test Agent' });
+
+    mockFetchHtml.mockResolvedValueOnce(htmlWith(listing));
+    const opted = parseToolResult<{
+      listing_agent?: Record<string, string>;
+    }>(
+      await harness.callTool('homes_get_property', {
+        url: '/property/foo/abc/',
+        include_agent_contact: true,
+      })
+    );
+    expect(opted.listing_agent).toEqual({
+      name: 'Test Agent',
+      telephone: '+1-555-555-0199',
+      email: 'agent@example.com',
+    });
   });
 
   it('throws when JSON-LD is absent', async () => {

@@ -278,6 +278,13 @@ export interface FormatOptions {
   includePriceHistory?: boolean;
   /** Inline `tax_history` records on the formatted record (#27). */
   includeTaxHistory?: boolean;
+  /**
+   * Emit the listing agent's `telephone` / `email` on `listing_agent`.
+   * Default false: the record carries name / job_title / profile url +
+   * brokerage only, so bulk sweeps don't turn into an agent contact list
+   * in the transcript (chrischall/fleet-audit#1022).
+   */
+  includeAgentContact?: boolean;
 }
 
 /**
@@ -320,6 +327,20 @@ export function findListing(
  * `homes_get_property`, `homes_get_property_photos`, and
  * `homes_compare_properties`.
  */
+/**
+ * Shared `include_agent_contact` input for every tool that emits
+ * `listing_agent` via format() (chrischall/fleet-audit#1022).
+ */
+export function includeAgentContactArg() {
+  return z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      "When true, include the listing agent's `telephone` and `email` on `listing_agent`. Default false — name, job title, profile url and brokerage are returned without the contact details.",
+    );
+}
+
 export async function fetchListingRecord(
   client: HomesClient,
   args: { url?: string },
@@ -341,12 +362,15 @@ export async function fetchListingRecord(
 
 function formatAgent(
   agent: JsonLdAgent | undefined,
+  includeContact = false,
 ): FormattedAgent | undefined {
   if (!agent) return undefined;
   const out: FormattedAgent = {};
   if (agent.name) out.name = agent.name;
-  if (agent.telephone) out.telephone = agent.telephone;
-  if (agent.email) out.email = agent.email;
+  if (includeContact) {
+    if (agent.telephone) out.telephone = agent.telephone;
+    if (agent.email) out.email = agent.email;
+  }
   if (agent.jobTitle) out.job_title = agent.jobTitle;
   if (agent.url) out.url = agent.url;
   return Object.keys(out).length > 0 ? out : undefined;
@@ -403,7 +427,7 @@ export function format(
     status: offers.availability,
     date_posted: listing.datePosted,
     date_modified: listing.dateModified,
-    listing_agent: formatAgent(agent),
+    listing_agent: formatAgent(agent, opts.includeAgentContact),
     brokerage: brokerageFrom(agent) ?? offers.seller?.name,
     ...extras,
   };
@@ -495,7 +519,7 @@ export function registerPropertyTools(
     {
       title: "Get homes.com property details",
       description:
-        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot_size_sqft plus the derived lot_size_acres (round(lot_size_sqft / 43560, 2); both null — never 0 — for condos and listings with no lot), parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. Read-only; safe to call repeatedly.",
+        "Fetch a property's full homes.com record. Pass `url` — the full property detail URL (e.g. from a homes_search_properties result's `url` field). Parses the page's Schema.org JSON-LD plus DOM-side sections to return address, lat/lng, beds/baths, sqft, year built, price, status, listing agent + brokerage, highlights, estimated monthly payment, total views, Matterport tour URL, floorplan URLs, schools, HOA fee, lot_size_sqft plus the derived lot_size_acres (round(lot_size_sqft / 43560, 2); both null — never 0 — for condos and listings with no lot), parking, heating/cooling, MLS ID/source, and date posted/modified. Also returns `extracted_features` (lake_front, hot_tub, basement, furnished, dock, community) derived server-side from the listing description so callers don't have to keyword-parse marketing prose. Pass `include_price_history: true` to inline the same data `homes_get_property_history` returns (`listing_events`, `ownership_events`, `lien_events`, `events_normalized`) under `price_history`. Pass `include_tax_history: true` to inline `homes_get_tax_history` records under `tax_history`. Both are off by default; opting in costs nothing extra over the dedicated tools (same page fetch). The raw `description` is omitted by default; pass `include_description: true` to opt back in. `listing_agent` carries name / job title / profile url only; pass `include_agent_contact: true` for the agent's telephone and email. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Get homes.com property details",
         readOnlyHint: true,
@@ -529,6 +553,7 @@ export function registerPropertyTools(
           .describe(
             "When true, inline `tax_history` records — same data `homes_get_tax_history` returns. Saves a second round trip when you need both (#27).",
           ),
+        include_agent_contact: includeAgentContactArg(),
         view: viewArg(),
       }),
     },
@@ -537,6 +562,7 @@ export function registerPropertyTools(
       include_description,
       include_price_history,
       include_tax_history,
+      include_agent_contact,
       view,
     }) => {
       const { listing, html } = await fetchListingRecord(client, { url });
@@ -546,6 +572,7 @@ export function registerPropertyTools(
           includeDescription: include_description,
           includePriceHistory: include_price_history,
           includeTaxHistory: include_tax_history,
+          includeAgentContact: include_agent_contact,
         }),
       );
     },

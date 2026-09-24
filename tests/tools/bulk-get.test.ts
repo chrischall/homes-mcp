@@ -391,4 +391,50 @@ describe('homes_bulk_get', () => {
     );
     expect(withDesc.results[0].property?.description).toContain('Charming');
   });
+
+  it('omits listing-agent telephone/email unless include_agent_contact (fleet-audit#1022)', async () => {
+    let n = 0;
+    mockFetchHtml.mockImplementation(async () => {
+      n++;
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        url: `https://www.homes.com/property/foo/id-${n}/`,
+        offers: {
+          price: 100_000,
+          offeredBy: [
+            {
+              name: 'Test Agent',
+              telephone: '+1-555-555-0199',
+              email: 'agent@example.com',
+            },
+          ],
+        },
+        mainEntity: {},
+      });
+    });
+    type Parsed = {
+      results: Array<{ property?: { listing_agent?: Record<string, string> } }>;
+    };
+    const def = parseToolResult<Parsed>(
+      await h.callTool('homes_bulk_get', { urls: ['/property/foo/a/', '/property/foo/b/'] })
+    );
+    expect(def.results).toHaveLength(2);
+    for (const row of def.results) {
+      expect(row.property?.listing_agent).toEqual({ name: 'Test Agent' });
+    }
+
+    const opted = parseToolResult<Parsed>(
+      await h.callTool('homes_bulk_get', {
+        urls: ['/property/foo/a/', '/property/foo/b/'],
+        include_agent_contact: true,
+      })
+    );
+    for (const row of opted.results) {
+      expect(row.property?.listing_agent).toEqual({
+        name: 'Test Agent',
+        telephone: '+1-555-555-0199',
+        email: 'agent@example.com',
+      });
+    }
+  });
 });

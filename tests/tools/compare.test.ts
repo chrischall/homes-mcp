@@ -237,4 +237,50 @@ describe('homes_compare_properties tool', () => {
     expect(parsed.results[1].error).toMatch(/^bridge timeout after retry:/);
     expect(parsed.results[2].property).toBeTruthy();
   });
+
+  it('omits listing-agent telephone/email unless include_agent_contact (fleet-audit#1022)', async () => {
+    let n = 0;
+    mockFetchHtml.mockImplementation(async () => {
+      n++;
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        url: `https://www.homes.com/property/foo/id-${n}/`,
+        offers: {
+          price: 100_000,
+          offeredBy: [
+            {
+              name: 'Test Agent',
+              telephone: '+1-555-555-0199',
+              email: 'agent@example.com',
+            },
+          ],
+        },
+        mainEntity: {},
+      });
+    });
+    type Parsed = {
+      results: Array<{ property?: { listing_agent?: Record<string, string> } }>;
+    };
+    const def = parseToolResult<Parsed>(
+      await harness.callTool('homes_compare_properties', { targets: [{ url: '/property/foo/a/' }, { url: '/property/foo/b/' }] })
+    );
+    expect(def.results).toHaveLength(2);
+    for (const row of def.results) {
+      expect(row.property?.listing_agent).toEqual({ name: 'Test Agent' });
+    }
+
+    const opted = parseToolResult<Parsed>(
+      await harness.callTool('homes_compare_properties', {
+        targets: [{ url: '/property/foo/a/' }, { url: '/property/foo/b/' }],
+        include_agent_contact: true,
+      })
+    );
+    for (const row of opted.results) {
+      expect(row.property?.listing_agent).toEqual({
+        name: 'Test Agent',
+        telephone: '+1-555-555-0199',
+        email: 'agent@example.com',
+      });
+    }
+  });
 });
