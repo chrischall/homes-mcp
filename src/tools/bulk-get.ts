@@ -9,6 +9,7 @@ import {
 import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import {
+  includeAgentContactArg,
   fetchListingRecord,
   format,
   type FormattedProperty,
@@ -88,7 +89,7 @@ export function registerBulkGetTools(
     {
       title: "Bulk-fetch homes.com properties (structured records only)",
       description:
-        'Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won\'t fail the whole call). Each row carries a `status` (`ok` / `error` / `pending`). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: "pending"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.',
+        'Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won\'t fail the whole call). Each row carries a `status` (`ok` / `error` / `pending`). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. `listing_agent` omits the agent\'s telephone/email unless `include_agent_contact: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: "pending"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.',
       annotations: {
         title: "Bulk-fetch homes.com properties (structured records only)",
         readOnlyHint: true,
@@ -110,10 +111,11 @@ export function registerBulkGetTools(
           .describe(
             "When true, include the raw listing `description` marketing prose per-row. Default false.",
           ),
+        include_agent_contact: includeAgentContactArg(),
         view: viewArg(),
       }),
     },
-    async ({ urls, include_description, view }) => {
+    async ({ urls, include_description, include_agent_contact, view }) => {
       // #54 partial-results contract (D1), now via `runBoundedBatch`
       // (mcp-utils 0.8 — the slot-array + overall-deadline + pending-backfill
       // pattern hoisted out of the cohort's hand-rolled `runWithDeadline`,
@@ -148,6 +150,7 @@ export function registerBulkGetTools(
           });
           const formatted = format(listing, html, {
             includeDescription: include_description,
+            includeAgentContact: include_agent_contact,
           });
           return {
             url,

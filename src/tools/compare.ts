@@ -9,6 +9,7 @@ import {
 import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import {
+  includeAgentContactArg,
   fetchListingRecord,
   format,
   type FormattedProperty,
@@ -80,7 +81,7 @@ export function registerCompareTools(
     {
       title: "Compare homes.com properties side-by-side",
       description:
-        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, `lot_size_sqft` + the derived `lot_size_acres`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
+        "Fetch 2 or more homes.com properties and align their facts side-by-side. Each target supplies a `url` — the full homes.com property URL (e.g. from a homes_search_properties result's `url` field). Returns the full per-property record (with server-side `extracted_features`, `hoa_monthly_usd`, `days_on_market`, `price_drop_*`, `lot_size_sqft` + the derived `lot_size_acres`, and `portal_url_hyperlink`). Per-target errors are captured per-row — one bad target will not fail the whole call. Calls are concurrent. The raw `description` is omitted by default; pass `include_description: true` to keep the marketing prose. `listing_agent` omits the agent's telephone/email unless `include_agent_contact: true`. The cross-row `summary` table duplicates per-property fields (~30% of response weight); it is OPT-IN via `include_summary: true`.",
       annotations: {
         title: "Compare homes.com properties side-by-side",
         readOnlyHint: true,
@@ -118,9 +119,16 @@ export function registerCompareTools(
           .describe(
             "When true, also emit a cross-row `summary` table aligned by field. Default false — the per-row records already carry every summary field, so the table is redundant context weight unless explicitly requested (#18).",
           ),
+      include_agent_contact: includeAgentContactArg(),
       }),
     },
-    async ({ targets, include_description, include_summary, view }) => {
+    async ({
+      targets,
+      include_description,
+      include_summary,
+      include_agent_contact,
+      view,
+    }) => {
       const ts = targets as CompareTarget[];
       // See bulk-get.ts header for the round-3 #78 rationale on
       // BRIDGE_CONCURRENCY + retryOnceOnTimeout + classifyRowError.
@@ -137,6 +145,7 @@ export function registerCompareTools(
             );
             const formatted = format(listing, html, {
               includeDescription: include_description,
+              includeAgentContact: include_agent_contact,
             });
             return {
               property_id: formatted.property_id,
