@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.5](https://github.com/chrischall/homes-mcp/compare/v2.1.4...v2.1.5) (2026-09-25)
+
+
+### Bug Fixes
+
+* **deps:** take realty-core 0.4.8 address matching (wrong house, unit numbers) ([#245](https://github.com/chrischall/homes-mcp/issues/245)) ([f92fbde](https://github.com/chrischall/homes-mcp/commit/f92fbdef221875dbc786a631a4b68e5c0c916ce3))
+* **properties:** omit listing-agent phone and email unless include_agent_contact is set ([#241](https://github.com/chrischall/homes-mcp/issues/241)) ([b55eb02](https://github.com/chrischall/homes-mcp/commit/b55eb0204694bcd7a0e7e036467c42f7754b3d63))
+
 ## [2.1.4](https://github.com/chrischall/homes-mcp/compare/v2.1.3...v2.1.4) (2026-09-23)
 
 
