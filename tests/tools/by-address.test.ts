@@ -417,6 +417,31 @@ describe('homes_get_by_address tool', () => {
       }
     });
 
+    it('resolves a unit-bearing address to the street listing on the fallback (realty-core 0.4.8)', async () => {
+      // Search-fallback listings carry the street line only. realty-core
+      // 0.4.7 anchored on EVERY number, so the unit id "5" in "Apt 5" had
+      // to appear in the listing and the right house was rejected.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([
+          itemFor('aaa', '127 Sleeping Bear Ln'),
+          itemFor('ccc', '126 Sleeping Bear Ln'),
+        ])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln Apt 5',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(true);
+      if (parsed.resolved) {
+        expect(parsed.property_hash).toBe('ccc');
+        expect(parsed.matched_via).toBe('search_fallback');
+      }
+    });
+
     it('falls back to the zip-only search when neither city nor state is given', async () => {
       mockFetchHtml.mockClear();
       mockFetchHtml.mockResolvedValueOnce('<html>nothing</html>');
