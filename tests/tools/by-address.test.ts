@@ -417,6 +417,25 @@ describe('homes_get_by_address tool', () => {
       }
     });
 
+    it('rejects the opposite-directional house on the fallback instead of resolving to it (realty-core 0.4.8)', async () => {
+      // The only search-fallback listing is 126 S Main St. realty-core
+      // <=0.4.2 ignored directionals, so "126 N Main St" scored a perfect
+      // match and the tool resolved to the wrong house; 0.4.8 treats N vs S
+      // as a different street, so the fallback misses.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('sss', '126 S Main St')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 N Main St',
+        city: 'Lake Lure',
+        state: 'NC',
+        zip: '28746',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed.resolved).toBe(false);
+    });
+
     it('resolves a unit-bearing address to the street listing on the fallback (realty-core 0.4.8)', async () => {
       // Search-fallback listings carry the street line only. realty-core
       // 0.4.7 anchored on EVERY number, so the unit id "5" in "Apt 5" had
