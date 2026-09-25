@@ -119,7 +119,7 @@ export function registerCompareTools(
           .describe(
             "When true, also emit a cross-row `summary` table aligned by field. Default false — the per-row records already carry every summary field, so the table is redundant context weight unless explicitly requested (#18).",
           ),
-      include_agent_contact: includeAgentContactArg(),
+        include_agent_contact: includeAgentContactArg(),
       }),
     },
     async ({
