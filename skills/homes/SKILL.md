@@ -34,7 +34,7 @@ MCP server for homes.com — natural-language access to listings, property recor
 The extension is installed separately — it is **not** bundled in this repo. Get it from the [ContextMint Bridge releases](https://github.com/nullnet-app/contextmint-bridge/releases):
 
 - **Chrome:** unzip the Chrome zip, then `chrome://extensions` → Developer mode → Load unpacked.
-- **Safari:** it ships inside the ContextMint app, which has no public download link yet.
+- **Safari:** not available yet (it will ship inside the ContextMint app, which has no public download) — use Chrome for now.
 
 ContextMint Bridge is the renamed fetchproxy extension from the same maintainer ([fetchproxy's README](https://github.com/chrischall/fetchproxy#extension) points to it); its source is public, so build it yourself or verify a release zip with `shasum -a 256 -c <zip>.sha256`.
 

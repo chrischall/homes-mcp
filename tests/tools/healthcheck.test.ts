@@ -461,7 +461,8 @@ describe('homes_healthcheck timeout vs. extension link state', () => {
     });
     const parsed = await run(client);
     expect(parsed.error?.kind).toBe('session_not_ready');
-    expect(parsed.hint).toMatch(/No Transporter extension is attached/i);
+    expect(parsed.hint).toMatch(/ContextMint Bridge isn't attached to this bridge/);
+    expect(parsed.hint).toContain('https://github.com/nullnet-app/contextmint-bridge/releases');
     expect(parsed.hint).not.toMatch(/interact/i);
   });
 
