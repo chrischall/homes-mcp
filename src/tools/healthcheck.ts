@@ -11,7 +11,7 @@ import { FetchproxyTimeoutError } from "../transport-fetchproxy.js";
  * so the user can tell, with ONE tool call and no real search, whether:
  *
  *   - homes-mcp's WebSocket bridge is up (`bridge.role` non-null)
- *   - the fetchproxy browser extension is attached and paired
+ *   - the ContextMint Bridge browser extension is attached and paired
  *     (`bridge.session_state` / `pending_pair_code` / `extension_connected`,
  *     @fetchproxy/server 2.5.0+)
  *   - the active homes.com tab is responsive (the fetch resolved within
@@ -131,9 +131,9 @@ export function registerHealthcheckTools(
     // configured port) use the shared ladder verbatim.
     hints: {
       ok: `Bridge round-tripped ${PROBE_PATH} successfully. If real tools still hang, the problem is downstream of fetchproxy (homes.com redirecting on sign-in, AWS WAF challenge, etc.) — not the bridge.`,
-      timeout: `Bridge is alive, but the probe didn't get a response within ${PROBE_DEADLINE_S}s. The fix is almost always to wake the homes.com tab: open a homes.com portal tab in your browser, sign in if needed, and INTERACT with it (scroll or click) so the page becomes active — a loaded, signed-in, interacted tab is what unblocks the bridge. Then retry. If that doesn't help, the fetchproxy browser extension may not be connected to this MCP — open the extension popup and check for a green dot next to "homes-mcp".`,
+      timeout: `Bridge is alive, but the probe didn't get a response within ${PROBE_DEADLINE_S}s. The fix is almost always to wake the homes.com tab: open a homes.com portal tab in your browser, sign in if needed, and INTERACT with it (scroll or click) so the page becomes active — a loaded, signed-in, interacted tab is what unblocks the bridge. Then retry. If that doesn't help, the ContextMint Bridge browser extension may not be connected to this MCP — open the extension popup and check for a green dot next to "homes-mcp".`,
       protocol: `The bridge returned a protocol error before any HTTP response. Most commonly: no homes.com tab is open, or the extension declined the request. Open homes.com, sign in, and retry.`,
-      bridge_down: `The fetchproxy browser extension's service worker is not responding even after homes-mcp's automatic lazy-revive retry. Chrome evicts extension service workers after ~30s idle by default. Wake it manually by clicking the fetchproxy extension icon in your browser toolbar, or open chrome://extensions and reload the fetchproxy extension. Then retry.`,
+      bridge_down: `The ContextMint Bridge browser extension's service worker is not responding even after homes-mcp's automatic lazy-revive retry. Chrome evicts extension service workers after ~30s idle by default. Wake it manually by clicking the ContextMint Bridge extension icon in your browser toolbar, or open chrome://extensions and reload the ContextMint Bridge extension. Then retry.`,
     },
   });
 }

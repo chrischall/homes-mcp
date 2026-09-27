@@ -1,16 +1,16 @@
 ---
 name: homes
-description: Look up real-estate listings, property details, price/tax history, market reports, saved homes, and photo galleries on homes.com via MCP. Triggers on phrases like "find homes on homes.com in", "homes.com property details for", "what does homes.com say about", "homes.com price history for", or any request involving homes.com properties, prices, history, or photos. Requires homes-mcp installed and the fetchproxy extension active (see Setup below).
+description: Look up real-estate listings, property details, price/tax history, market reports, saved homes, and photo galleries on homes.com via MCP. Triggers on phrases like "find homes on homes.com in", "homes.com property details for", "what does homes.com say about", "homes.com price history for", or any request involving homes.com properties, prices, history, or photos. Requires homes-mcp installed and the ContextMint Bridge extension active (see Setup below).
 ---
 
 # homes-mcp
 
-MCP server for homes.com — natural-language access to listings, property records, price/tax history, market reports, saved homes/searches, and photo galleries. Routes through your signed-in homes.com tab via the fetchproxy browser extension, so AWS WAF sees a real browser session instead of a Node process.
+MCP server for homes.com — natural-language access to listings, property records, price/tax history, market reports, saved homes/searches, and photo galleries. Routes through your signed-in homes.com tab via the ContextMint Bridge browser extension, so AWS WAF sees a real browser session instead of a Node process.
 
 - **npm:** [npmjs.com/package/homes-mcp](https://www.npmjs.com/package/homes-mcp)
 - **Source:** [github.com/chrischall/homes-mcp](https://github.com/chrischall/homes-mcp)
 
-> ⚠️ homes.com does not publish a public consumer API. This server reads the Schema.org JSON-LD blob (and some DOM-side sections) embedded in each SSR page, dispatched through your own signed-in browser tab via the fetchproxy extension. Use at your own discretion.
+> ⚠️ homes.com does not publish a public consumer API. This server reads the Schema.org JSON-LD blob (and some DOM-side sections) embedded in each SSR page, dispatched through your own signed-in browser tab via the ContextMint Bridge extension. Use at your own discretion.
 
 ## Setup
 
@@ -29,9 +29,14 @@ MCP server for homes.com — natural-language access to listings, property recor
 }
 ```
 
-### 2. Install the fetchproxy extension (one-time, shared across all fetchproxy-based MCPs)
+### 2. Install the ContextMint Bridge extension (one-time, shared across all fetchproxy-based MCPs)
 
-The extension lives in its own repo and is installed separately — it is **not** bundled in this repo. Follow the install instructions at [github.com/chrischall/fetchproxy](https://github.com/chrischall/fetchproxy), then load the built extension in Chrome via `chrome://extensions` → Developer mode → Load unpacked.
+The extension is installed separately — it is **not** bundled in this repo. Get it from the [ContextMint Bridge releases](https://github.com/nullnet-app/contextmint-bridge/releases):
+
+- **Chrome:** unzip the Chrome zip, then `chrome://extensions` → Developer mode → Load unpacked.
+- **Safari:** it ships inside the ContextMint app, which has no public download link yet.
+
+ContextMint Bridge is the renamed fetchproxy extension from the same maintainer ([fetchproxy's README](https://github.com/chrischall/fetchproxy#extension) points to it); its source is public, so build it yourself or verify a release zip with `shasum -a 256 -c <zip>.sha256`.
 
 ### 3. Open homes.com and sign in.
 

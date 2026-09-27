@@ -122,7 +122,7 @@ node dist/bundle.js    # launch the MCP server over stdio (also opens WS)
 
 ## Environment
 
-No env vars required. Auth lives in the user's signed-in homes.com tab via the fetchproxy extension.
+No env vars required. Auth lives in the user's signed-in homes.com tab via the ContextMint Bridge extension.
 
 Optional:
 

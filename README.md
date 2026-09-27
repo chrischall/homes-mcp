@@ -6,7 +6,7 @@
 
 homes.com real-estate access as an MCP server for Claude — search listings, resolve addresses, fetch property details, price/tax history, market reports, saved homes, photo galleries, and run affordability/mortgage math, all via natural language.
 
-> ⚠️ homes.com does not publish a public consumer API. This server reads the same server-rendered HTML and Schema.org JSON-LD that homes.com itself ships to your browser, routed through your own signed-in browser tab via the [fetchproxy](https://github.com/chrischall/fetchproxy) extension. Every request acts on behalf of your existing session — your cookies, your TLS, your JS context — exactly as if you'd clicked it in the browser yourself. Treat this as informal use of homes.com. Use at your own discretion.
+> ⚠️ homes.com does not publish a public consumer API. This server reads the same server-rendered HTML and Schema.org JSON-LD that homes.com itself ships to your browser, routed through your own signed-in browser tab via the [ContextMint Bridge](https://github.com/nullnet-app/contextmint-bridge/releases) browser extension. Every request acts on behalf of your existing session — your cookies, your TLS, your JS context — exactly as if you'd clicked it in the browser yourself. Treat this as informal use of homes.com. Use at your own discretion.
 
 ## Tools
 
@@ -42,7 +42,7 @@ For rental signals, use a sibling MCP: **`zillow_get_property`** carries `rent_z
 
 By using this MCP server, you acknowledge and agree to the following:
 
-**1. This server accesses your own homes.com session.** Every request is dispatched through your own browser tab via the fetchproxy extension — your cookies, your TLS, your session. It does not — and cannot — access anyone else's account.
+**1. This server accesses your own homes.com session.** Every request is dispatched through your own browser tab via the ContextMint Bridge extension — your cookies, your TLS, your session. It does not — and cannot — access anyone else's account.
 
 **2. [homes.com's Terms of Use](https://www.homes.com/about/terms-of-use) govern your use of this server**, just as they govern your direct use of homes.com. The terms prohibit automated crawling without written permission, and IDX listing data is licensed for personal, non-commercial use only. You are agreeing to those terms every time you invoke a tool in this server.
 
@@ -93,7 +93,12 @@ npm run build
 
 ### One-time browser setup
 
-homes-mcp talks to your browser through the [fetchproxy](https://github.com/chrischall/fetchproxy) extension, which is shared across every fetchproxy-based MCP (zillow-mcp, opentable-mcp, resy-mcp, …). It lives in its own repo and is installed separately — it is **not** bundled here. Follow the install instructions at [github.com/chrischall/fetchproxy](https://github.com/chrischall/fetchproxy), then load the built extension in Chrome via `chrome://extensions` → toggle Developer mode → Load unpacked.
+homes-mcp talks to your browser through the **ContextMint Bridge** extension, which is shared across every fetchproxy-based MCP (zillow-mcp, opentable-mcp, resy-mcp, …) and installed separately — it is **not** bundled here. Get it from the [ContextMint Bridge releases](https://github.com/nullnet-app/contextmint-bridge/releases):
+
+- **Chrome:** download the Chrome zip, unzip it, then `chrome://extensions` → toggle Developer mode → Load unpacked → pick the unzipped folder.
+- **Safari:** the extension ships inside the ContextMint app, which has no public download link yet.
+
+**Where it comes from.** ContextMint Bridge is the fetchproxy browser extension under its new name, from the same maintainer; fetchproxy's own README ([Extension](https://github.com/chrischall/fetchproxy#extension)) points to it. Its source is public at [nullnet-app/contextmint-bridge](https://github.com/nullnet-app/contextmint-bridge): build it yourself, or check a release zip against the `.sha256` file published beside it (`shasum -a 256 -c contextmint-bridge-chrome-<version>.zip.sha256`). There is no Chrome Web Store listing yet.
 
 Open homes.com and sign in. That's all the auth this server needs.
 
@@ -101,12 +106,12 @@ Open homes.com and sign in. That's all the auth this server needs.
 
 ```
 ┌────────────────┐  stdio   ┌──────────────────┐   WS   ┌──────────────────┐    fetch()    ┌─────────────┐
-│ MCP client     │◀────────▶│  dist/bundle.js  │◀──────▶│  fetchproxy      │◀────────────▶│ homes.com  │
-│ (Claude, etc.) │          │  (Homes MCP)    │ :37149 │  extension       │   (real TLS, │ (your tab)  │
+│ MCP client     │◀────────▶│  dist/bundle.js  │◀──────▶│  ContextMint     │◀────────────▶│ homes.com  │
+│ (Claude, etc.) │          │  (Homes MCP)    │ :37149 │  Bridge          │   (real TLS, │ (your tab)  │
 └────────────────┘          └──────────────────┘        │  (separate)      │   cookies)    └─────────────┘
 ```
 
-The MCP server runs in Node, but every HTTP call to homes.com is dispatched into your live browser tab through the fetchproxy extension. Each request rides your existing session — TLS fingerprint, cookies, and JS execution context all match the page that's already on screen. No headless browser stand-in, no separate identity, no third-party proxy: just your real browser, acting on its own behalf, with the MCP server picking what to ask for.
+The MCP server runs in Node, but every HTTP call to homes.com is dispatched into your live browser tab through the ContextMint Bridge extension. Each request rides your existing session — TLS fingerprint, cookies, and JS execution context all match the page that's already on screen. No headless browser stand-in, no separate identity, no third-party proxy: just your real browser, acting on its own behalf, with the MCP server picking what to ask for.
 
 homes.com's pages are SSR React with no public JSON API — every tool extracts data from the Schema.org JSON-LD block embedded in each page (`<script type="application/ld+json">`). Search pages put listings in `CollectionPage.mainEntity.itemListElement[]`; detail pages emit a `RealEstateListing` graph node with `mainEntity` (address, size, geo) and `offers.offeredBy[]` (listing agent). Photos are scraped from the DOM since the JSON-LD only carries one primary image. The client wraps that into the tool surface so callers never have to parse HTML themselves.
 

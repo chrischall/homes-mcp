@@ -7,7 +7,7 @@
  * (required) instead of the old optional `account_hint`. `mark_active` is
  * RETAINED — register-and-activate still works in a single call.
  *
- * The homes-mcp transport physically bridges to ONE fetchproxy extension at a
+ * The homes-mcp transport physically bridges to ONE ContextMint Bridge extension at a
  * time; the registry is a labelled-context layer on top.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -138,7 +138,7 @@ describe('homes_set_active_session', () => {
 describe('session tool descriptions (fleet-audit #135)', () => {
   // Nothing in homes-mcp reads the registry to route requests and no tool
   // takes a `session_id`: every call goes through whichever browser tab the
-  // fetchproxy extension is bound to. The descriptions must not promise
+  // ContextMint Bridge extension is bound to. The descriptions must not promise
   // per-session routing the server does not do.
   async function descriptions(): Promise<Record<string, string>> {
     const tools = await h.listTools();

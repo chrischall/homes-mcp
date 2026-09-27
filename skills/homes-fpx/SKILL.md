@@ -16,7 +16,7 @@ homes.com is a fully server-rendered site with **no public JSON API**
 and gates traffic through **AWS WAF at the session level** — every
 request, not just login, needs to ride a real browser session. `fpx`
 routes each call through the user's own signed-in `www.homes.com` tab
-(the Transporter extension), which has already cleared the WAF
+(the ContextMint Bridge extension), which has already cleared the WAF
 challenge, so the same fetch a Node process gets 403'd on succeeds.
 
 This is "Pattern A" (every call rides the bridge) — there's no
@@ -34,10 +34,14 @@ DOM scraping over specific, verified sections of the same pages the
 ```sh
 npm install -g @fetchproxy/cli       # provides `fpx`
 fpx profile add homes --domain homes.com
-fpx pair -p homes                    # prints a pair code → approve in Transporter
+fpx pair -p homes                    # prints a pair code → approve in ContextMint Bridge
 ```
 
-Requirements: the **Transporter** browser extension installed, with an
+Requirements: the **ContextMint Bridge** browser extension installed
+(from its [releases](https://github.com/nullnet-app/contextmint-bridge/releases) — Chrome: load the zip unpacked;
+Safari: ships inside the ContextMint app, not yet publicly downloadable;
+it is the renamed fetchproxy extension from the same maintainer — verify a
+release zip with `shasum -a 256 -c <zip>.sha256` or build from source), with an
 open `www.homes.com` tab (signed in — required for the saved-homes/
 saved-searches tools below, and helps every other page render the way
 the extractors expect), and its Chrome **Site access** allowing

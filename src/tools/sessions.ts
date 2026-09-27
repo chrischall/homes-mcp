@@ -37,7 +37,7 @@ import {
 const LABEL_ONLY =
   'The registry is a label only: it does not change which Homes.com account ' +
   'requests use. Every homes tool call goes through whichever browser tab the ' +
-  'fetchproxy extension is signed into; to read a different account, sign that ' +
+  'ContextMint Bridge extension is signed into; to read a different account, sign that ' +
   'tab into it.';
 
 export const SESSION_TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
