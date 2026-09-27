@@ -96,7 +96,9 @@ npm run build
 homes-mcp talks to your browser through the **ContextMint Bridge** extension, which is shared across every fetchproxy-based MCP (zillow-mcp, opentable-mcp, resy-mcp, …) and installed separately — it is **not** bundled here. Get it from the [ContextMint Bridge releases](https://github.com/nullnet-app/contextmint-bridge/releases):
 
 - **Chrome:** download the Chrome zip, unzip it, then `chrome://extensions` → toggle Developer mode → Load unpacked → pick the unzipped folder.
-- **Safari:** the extension ships inside the ContextMint app — install the app and enable the extension in Safari's settings.
+- **Safari:** the extension ships inside the ContextMint app, which has no public download link yet.
+
+**Where it comes from.** ContextMint Bridge is the fetchproxy browser extension under its new name, from the same maintainer; fetchproxy's own README ([Extension](https://github.com/chrischall/fetchproxy#extension)) points to it. Its source is public at [nullnet-app/contextmint-bridge](https://github.com/nullnet-app/contextmint-bridge): build it yourself, or check a release zip against the `.sha256` file published beside it (`shasum -a 256 -c contextmint-bridge-chrome-<version>.zip.sha256`). There is no Chrome Web Store listing yet.
 
 Open homes.com and sign in. That's all the auth this server needs.
 

@@ -39,7 +39,9 @@ fpx pair -p homes                    # prints a pair code → approve in Context
 
 Requirements: the **ContextMint Bridge** browser extension installed
 (from its [releases](https://github.com/nullnet-app/contextmint-bridge/releases) — Chrome: load the zip unpacked;
-Safari: ships inside the ContextMint app), with an
+Safari: ships inside the ContextMint app, not yet publicly downloadable;
+it is the renamed fetchproxy extension from the same maintainer — verify a
+release zip with `shasum -a 256 -c <zip>.sha256` or build from source), with an
 open `www.homes.com` tab (signed in — required for the saved-homes/
 saved-searches tools below, and helps every other page render the way
 the extractors expect), and its Chrome **Site access** allowing
