@@ -52,7 +52,7 @@ await runMcp({
   version: VERSION,
   banner:
     `[homes-mcp] v${VERSION} — WebSocket bridge via @fetchproxy/server on 127.0.0.1:${port}. ` +
-    'Install the fetchproxy extension (see https://github.com/chrischall/fetchproxy) ' +
+    'Install the ContextMint Bridge extension (see https://github.com/nullnet-app/contextmint-bridge/releases) ' +
     'and sign into homes.com. This project was developed and is maintained by AI (Claude). ' +
     'Use at your own discretion.',
   tools: [

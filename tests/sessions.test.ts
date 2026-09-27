@@ -13,7 +13,7 @@
  *   - `setActive` returns a boolean (false for unknown ids);
  *   - `register` + `setActive` together give register-and-activate.
  *
- * The homes-mcp transport physically bridges to ONE fetchproxy extension
+ * The homes-mcp transport physically bridges to ONE ContextMint Bridge extension
  * at a time; the registry is a labelled-context layer on top so the
  * "signed in under two accounts" workflow stays visible end-to-end.
  */
