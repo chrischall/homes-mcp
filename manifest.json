@@ -60,7 +60,7 @@
     },
     {
       "name": "homes_healthcheck",
-      "description": "Verify the fetchproxy bridge end-to-end"
+      "description": "Verify the ContextMint Bridge connection end-to-end"
     }
   ]
 }
