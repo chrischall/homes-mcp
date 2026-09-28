@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.6](https://github.com/chrischall/homes-mcp/compare/v2.1.5...v2.1.6) (2026-09-28)
+
+
+### Bug Fixes
+
+* **deps:** move to [@fetchproxy](https://github.com/fetchproxy) 3.4 for ContextMint Bridge errors, capability subsets and managed pins ([#247](https://github.com/chrischall/homes-mcp/issues/247)) ([4a95010](https://github.com/chrischall/homes-mcp/commit/4a950107630880046aa7c341a66efe747b17d285))
+* **deps:** move to @chrischall/mcp-utils 2.8 and [@fetchproxy](https://github.com/fetchproxy) 3.4.1 for clearer browser-bridge errors ([#250](https://github.com/chrischall/homes-mcp/issues/250)) ([2aec5d6](https://github.com/chrischall/homes-mcp/commit/2aec5d619fdf654353a5661a197973aef55ee82f))
+
 ## [2.1.5](https://github.com/chrischall/homes-mcp/compare/v2.1.4...v2.1.5) (2026-09-25)
 
 
