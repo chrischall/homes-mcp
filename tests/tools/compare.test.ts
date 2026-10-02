@@ -299,3 +299,18 @@ describe('homes_compare_properties tool', () => {
     }
   });
 });
+
+describe('homes_compare_properties description', () => {
+  it('documents the row envelope: status/error_kind/retryable, ok/errored, deadline pending rows', async () => {
+    const th = await createTestHarness((server) => registerCompareTools(server, mockClient));
+    try {
+      const tool = (await th.listTools()).find((t) => t.name === 'homes_compare_properties');
+      expect(tool?.description).toMatch(/error_kind/);
+      expect(tool?.description).toMatch(/retryable/);
+      expect(tool?.description).toMatch(/`ok` \/ `errored`/);
+      expect(tool?.description).toMatch(/pending/);
+    } finally {
+      await th.close();
+    }
+  });
+});
