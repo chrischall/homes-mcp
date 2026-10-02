@@ -6,13 +6,13 @@ import {
   classifyRowError,
   retryOnceOnTimeout,
 } from "@chrischall/mcp-utils/fetchproxy";
+import { runRowBatch } from "@chrischall/realty-core";
 import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import {
   includeAgentContactArg,
   fetchListingRecord,
   format,
-  type FormattedProperty,
 } from "./properties.js";
 
 /**
@@ -54,30 +54,6 @@ export interface BulkGetTuning {
   overallDeadlineMs?: number;
 }
 
-/**
- * Per-row lifecycle marker. A row left `'pending'` when the overall
- * deadline fires never got a chance to finish — distinct from an error
- * row (a genuine per-row failure) so a caller can re-run just the
- * pending URLs in a follow-up batch. Mirrors `homes_resolve_addresses`'
- * `RowStatus` (#54).
- */
-type RowStatus = "ok" | "pending" | "error";
-
-interface BulkRow {
-  url: string;
-  /** Row lifecycle marker — always present so callers never infer it. */
-  status: RowStatus;
-  property_id?: string;
-  property?: FormattedProperty;
-  error?: string;
-}
-
-function throwIfDeadlinePassed(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) {
-    throw new Error("bulk_get overall deadline reached; row not fetched");
-  }
-}
-
 export function registerBulkGetTools(
   server: McpServer,
   client: HomesClient,
@@ -89,7 +65,7 @@ export function registerBulkGetTools(
     {
       title: "Bulk-fetch homes.com properties (structured records only)",
       description:
-        'Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won\'t fail the whole call). Each row carries a `status` (`ok` / `error` / `pending`). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. `listing_agent` omits the agent\'s telephone/email unless `include_agent_contact: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: "pending"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.',
+        'Fetch up to 200 homes.com properties in one call and return their structured records. Pass `urls: string[]`. Results are ordered to match the input array and per-row errors are captured (one bad URL won\'t fail the whole call). Each row carries a `status`: `ok`, `pending`, or — on failure — the error kind (`timeout` / `bridge_down` / `protocol` / `other`, also in `error_kind`) with a `retryable` flag; the envelope reports `count` / `ok` / `errored` (+ `pending` when non-zero). Mirrors `homes_get_property` per-row, including `extracted_features`, `hoa_fee`, `highlights`, `schools`, `lot_size_sqft` + the derived `lot_size_acres` (null — never 0 — for condos / no-lot listings), and all standard listing fields. The raw `description` is omitted by default; opt back in via `include_description: true`. `listing_agent` omits the agent\'s telephone/email unless `include_agent_contact: true`. The whole call is bounded by an overall hard deadline: a single slow/hung URL never wedges the server — when the deadline is reached any unsettled row is returned with `status: "pending"` and a `pending` count so you can re-run just those URLs. Use this instead of looping `homes_compare_properties` (which caps at 8 + emits a redundant summary table) when you just want the records. Read-only; safe to call repeatedly.',
       annotations: {
         title: "Bulk-fetch homes.com properties (structured records only)",
         readOnlyHint: true,
@@ -116,75 +92,42 @@ export function registerBulkGetTools(
       }),
     },
     async ({ urls, include_description, include_agent_contact, view }) => {
-      // #54 partial-results contract (D1), now via `runBoundedBatch`
-      // (mcp-utils 0.8 — the slot-array + overall-deadline + pending-backfill
-      // pattern hoisted out of the cohort's hand-rolled `runWithDeadline`,
-      // with the worker + concurrency folded in). It returns a full-length,
-      // input-ordered `BulkRow[]` with exactly one row per URL:
+      // #54 partial-results contract (D1) via realty-core's shared
+      // `runRowBatch` (fleet-audit#1091): bounded by `concurrency`
+      // (BRIDGE_CONCURRENCY = 6, round-3 #78) and an overall deadline, with
+      // one input-ordered row per URL:
       //
-      //   - `worker(url)` fetches + formats and returns the `ok` row, throwing
-      //     on failure. retryOnceOnTimeout absorbs the rotating-tab tax that
-      //     hits the first request to a stale tab.
-      //   - `onError(url, _i, e)` backfills the `error` row. classifyRowError
-      //     keeps bridge timeouts / bridge-down distinct from real per-row
-      //     parse errors so a "20/20 with 2 timeouts" summary can't be
-      //     confused with "20/20 with 2 missing listings".
-      //   - `onTimeout(url)` backfills the `pending` row when the overall
-      //     deadline cuts an unsettled slot — distinct from an error row so a
-      //     caller can re-run just the pending URLs. A permanently-hung row is
-      //     abandoned (never awaited) rather than wedging the connection.
-      //   - `concurrency: BRIDGE_CONCURRENCY` (=6) caps in-flight requests so a
-      //     wide batch doesn't tip the bridge into timeouts (round-3 #78).
-      const rows = await runBoundedBatch<string, BulkRow>(
+      //   - ok rows: `{ url, status: 'ok', property_id, property }`.
+      //   - error rows: `status` = `error_kind` = the classified kind
+      //     (`timeout` / `bridge_down` / `protocol` / `other`) plus
+      //     `retryable` and `error`, so a bridge timeout can't be mistaken
+      //     for a missing listing. retryOnceOnTimeout absorbs the
+      //     rotating-tab tax on the first request to a stale tab.
+      //   - pending rows: the deadline cut them off — retryable, re-run them.
+      //
+      // Abort handling (fleet-audit#131 / #1161): mcp-utils >= 2.12
+      // `runBoundedBatch` stops dispatching once the deadline (or the
+      // caller's cancel) fires, and runRowBatch re-checks the signal before
+      // every attempt including the retry — so homes no longer carries its
+      // own per-worker `throwIfDeadlinePassed` guard.
+      const envelope = await runRowBatch(
         urls,
-        async (url, signal) => {
-          // runBoundedBatch aborts `signal` when the deadline fires, but its
-          // runners keep dequeuing (mcp-utils <= 2.4.0). Bail before any
-          // request — and before the timeout retry — so the rows already
-          // reported `pending` don't keep hitting homes.com through the
-          // user's browser tab after the call has returned
-          // (chrischall/fleet-audit#131).
-          const { listing, html } = await retryOnceOnTimeout(() => {
-            throwIfDeadlinePassed(signal);
-            return fetchListingRecord(client, { url });
-          });
+        async (url) => {
+          const { listing, html } = await fetchListingRecord(client, { url });
           const formatted = format(listing, html, {
             includeDescription: include_description,
             includeAgentContact: include_agent_contact,
           });
-          return {
-            url,
-            status: "ok",
-            property_id: formatted.property_id,
-            property: formatted,
-          };
+          return { property_id: formatted.property_id, property: formatted };
         },
         {
+          kit: { runBoundedBatch, classifyRowError, retryOnceOnTimeout },
+          toolLabel: "homes_bulk_get",
+          rowBase: (url) => ({ url }),
           deadlineMs: overallDeadlineMs,
           concurrency: BRIDGE_CONCURRENCY,
-          onError: (url, _index, e) => ({
-            url,
-            status: "error",
-            error: classifyRowError(e).message,
-          }),
-          onTimeout: (url) => ({
-            url,
-            status: "pending",
-            error:
-              "bulk_get overall deadline reached before this row settled — the " +
-              "request is still pending (likely a slow/hung sub-request). Re-run " +
-              "just the pending URLs; a single slow row no longer wedges the batch.",
-          }),
         },
       );
-
-      const pending = rows.filter((r) => r.status === "pending").length;
-      const envelope: {
-        count: number;
-        pending?: number;
-        results: BulkRow[];
-      } = { count: rows.length, results: rows };
-      if (pending > 0) envelope.pending = pending;
       return viewResponse(view, envelope);
     },
   );

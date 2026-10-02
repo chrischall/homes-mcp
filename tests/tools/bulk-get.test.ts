@@ -79,6 +79,50 @@ describe('homes_bulk_get', () => {
     expect(parsed.results[2].property?.price).toBe(500_000);
   });
 
+  it('emits the cohort row envelope: status/error_kind/retryable rows + ok/errored counts (fleet-audit#1091)', async () => {
+    mockFetchHtml.mockImplementation(async (path: string) => {
+      if (path === '/property/x/b/') {
+        throw new FetchproxyTimeoutError({ url: 'https://homes.com/', timeoutMs: 12000 });
+      }
+      if (path === '/property/x/c/') throw new Error('no listing');
+      return htmlWith({
+        '@type': ['RealEstateListing', 'Product'],
+        url: 'https://www.homes.com/property/x/abc/',
+        offers: { price: 1 },
+        mainEntity: { address: { streetAddress: '1 Main' } },
+      });
+    });
+    const parsed = parseToolResult<{
+      count: number;
+      ok: number;
+      errored: number;
+      results: Array<{
+        url: string;
+        status: string;
+        error_kind?: string;
+        retryable?: boolean;
+        property?: unknown;
+      }>;
+    }>(
+      await h.callTool('homes_bulk_get', {
+        urls: ['/property/x/a/', '/property/x/b/', '/property/x/c/'],
+      })
+    );
+    expect(parsed).toMatchObject({ count: 3, ok: 1, errored: 2 });
+    expect(parsed.results[0]).toMatchObject({ url: '/property/x/a/', status: 'ok' });
+    expect(parsed.results[1]).toMatchObject({
+      url: '/property/x/b/',
+      status: 'timeout',
+      error_kind: 'timeout',
+      retryable: true,
+    });
+    expect(parsed.results[2]).toMatchObject({
+      url: '/property/x/c/',
+      error_kind: 'other',
+      retryable: false,
+    });
+  });
+
   it('preserves input order in the response', async () => {
     let n = 0;
     // Reverse-order delay so first request resolves last — confirms we

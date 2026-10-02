@@ -392,3 +392,11 @@ describe('loadCommunities', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('DEFAULT_COMMUNITIES (fleet-audit#1175)', () => {
+  it('is the shared realty-core vocabulary', async () => {
+    const core = await import('@chrischall/realty-core');
+    expect(DEFAULT_COMMUNITIES).toEqual([...core.DEFAULT_COMMUNITIES]);
+    expect(Object.isFrozen(core.DEFAULT_COMMUNITIES)).toBe(true);
+  });
+});

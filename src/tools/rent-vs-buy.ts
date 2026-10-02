@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
   estimateRentVsBuy as coreEstimateRentVsBuy,
+  MAX_HORIZON_YEARS,
+  MAX_LOAN_TERM_YEARS,
   type RentVsBuyInput,
   type RentVsBuyInputsUsed,
 } from "@chrischall/realty-core";
@@ -79,8 +81,8 @@ export function registerRentVsBuyTools(server: McpServer): void {
         down_payment: z.number().nonnegative(),
         interest_rate: z.number().nonnegative(),
         monthly_rent: z.number().positive(),
-        horizon_years: z.number().int().positive().optional(),
-        loan_term_years: z.number().int().positive().optional(),
+        horizon_years: z.number().int().positive().max(MAX_HORIZON_YEARS).optional(),
+        loan_term_years: z.number().int().positive().max(MAX_LOAN_TERM_YEARS).optional(),
         property_tax_rate: z.number().nonnegative().optional(),
         insurance_annual: z.number().nonnegative().optional(),
         hoa_monthly: z.number().nonnegative().optional(),

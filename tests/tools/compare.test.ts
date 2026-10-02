@@ -236,6 +236,21 @@ describe('homes_compare_properties tool', () => {
     expect(parsed.results[0].property).toBeTruthy();
     expect(parsed.results[1].error).toMatch(/^bridge timeout after retry:/);
     expect(parsed.results[2].property).toBeTruthy();
+    // Cohort row envelope (fleet-audit#1091): the failed row is classified
+    // + flagged retryable, and the envelope counts ok vs errored rows.
+    const env = parseToolResult<{
+      ok: number;
+      errored: number;
+      results: Array<{ url?: string; status?: string; error_kind?: string; retryable?: boolean }>;
+    }>(r);
+    expect(env).toMatchObject({ ok: 2, errored: 1 });
+    expect(env.results[1]).toMatchObject({
+      url: '/property/foo/b/',
+      status: 'timeout',
+      error_kind: 'timeout',
+      retryable: true,
+    });
+    expect(env.results[0].status).toBe('ok');
   });
 
   it('omits listing-agent telephone/email unless include_agent_contact (fleet-audit#1022)', async () => {

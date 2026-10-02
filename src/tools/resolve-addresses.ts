@@ -1,10 +1,10 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { runBoundedBatch } from "@chrischall/mcp-utils";
 import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
   retryOnceOnTimeout,
-  withDeadline,
 } from "@chrischall/mcp-utils/fetchproxy";
 import type { HomesClient } from "../client.js";
 import { minifiedResult } from "../mcp.js";
@@ -21,8 +21,7 @@ import {
  * wins the race and can return partial rows, rather than the client
  * tearing the connection down first with a `-32001`.
  *
- * `withDeadline` itself now lives in `@fetchproxy/server` (promoted from
- * homes-mcp's local `src/tools/deadline.ts` in fetchproxy#86); only this
+ * The deadline + bounded pool is mcp-utils' `runBoundedBatch`; only this
  * homes-specific deadline value stays here.
  */
 export const RESOLVE_DEADLINE_MS = 50_000;
@@ -121,56 +120,56 @@ export function registerResolveAddressesTools(
     async ({ addresses }) => {
       const ts = addresses as ByAddressInput[];
 
-      // #54: partial-results contract. Seed every row as `'pending'`
-      // up front, then overwrite each in place as its resolution
-      // settles. If the overall deadline fires before a row finishes,
-      // it stays `'pending'` with an `error: 'timeout'` marker — so the
-      // caller always gets a full-length, input-ordered array with a
-      // status for every address, even when the batch is too big /
-      // homes.com too slow to finish in time. A bulk tool that wedges
-      // the whole MCP connection on a large input is worse than one
-      // that returns "here's what I got, retry the rest".
-      const rows: ResolveRow[] = ts.map((input) => ({
-        ...input,
-        resolved: false,
-        status: "pending",
-        error: "timeout",
-      }));
-
-      // Resolve one address into its row slot. `resolveOneAddress` owns
-      // the slug → fetch → parse → graceful "no listing found"
-      // degradation for generic transport errors; we only reshape the
-      // success row (renaming `property_hash` to `property_id` to line
-      // up with `homes_bulk_get`).
+      // #54 partial-results contract via mcp-utils `runBoundedBatch`: at most
+      // BRIDGE_CONCURRENCY (=6) rows in flight, the whole sweep raced against
+      // RESOLVE_DEADLINE_MS, and every row still unsettled at the deadline
+      // backfilled as `status: 'pending'` / `error: 'timeout'` — so the
+      // caller always gets a full-length, input-ordered array.
       //
       // Bridge-specific behaviour vs the single-call tool:
       //
       //   1. `retryOnceOnTimeout` absorbs the rotating-tab tax.
       //   2. `rethrowBridgeErrors: true` lets fetchproxy timeouts /
-      //      bridge-down errors surface distinctly via
-      //      `classifyRowError`, so a summary like "60/60 with 3
-      //      timeouts" doesn't masquerade as "60/60 with 3 missing
-      //      listings". Non-fetchproxy transport errors still degrade
-      //      to the canonical `'no listing found'` sentinel — the
-      //      parity contract with the single tool is preserved for
-      //      everything except fetchproxy bridge failures.
-      // Aborted when the overall deadline fires: workers stop dequeuing and
-      // every in-flight resolution stops before its next rung, so the rows
-      // already returned as `pending` don't keep generating requests
-      // through the user's browser tab (chrischall/fleet-audit#132).
-      const controller = new AbortController();
-      const { signal } = controller;
+      //      bridge-down errors surface distinctly via `classifyRowError`,
+      //      so "60/60 with 3 timeouts" doesn't masquerade as "60/60 with 3
+      //      missing listings". Non-fetchproxy transport errors still
+      //      degrade to the canonical `'no listing found'` sentinel.
+      //
+      // Abort (chrischall/fleet-audit#132 / #1161): mcp-utils >= 2.12
+      // `runBoundedBatch` stops dispatching once the deadline (or the
+      // caller's cancel) fires, so the old worker-loop `!signal.aborted`
+      // guards are gone. The batch signal still goes into
+      // `resolveOneAddress`, which checks it before every rung — a
+      // multi-request row stops mid-flight instead of finishing its rungs
+      // through the user's browser tab after the call has returned.
+      //
+      // Row statuses stay homes' resolver vocabulary (`resolved` /
+      // `unresolved` / `pending` / `blocked`) rather than realty-core's
+      // `runRowBatch` ok/error-kind envelope: an `unresolved` row is a real
+      // answer (homes.com has no match), not an error.
+      const poolSize = Math.min(BRIDGE_CONCURRENCY, ts.length);
+      let dispatched = 0;
+      let nextRefillAt = 0;
 
-      const resolveInto = async (index: number): Promise<void> => {
-        const input = ts[index];
-        try {
+      const rows = await runBoundedBatch<ByAddressInput, ResolveRow>(
+        ts,
+        async (input, signal) => {
+          // Paced refills (round-3 #78): the pool fills up front, then each
+          // later dispatch is spaced on a shared clock so freed workers
+          // don't re-stampede the bridge on the same tick.
+          if (dispatched++ >= poolSize) {
+            const now = Date.now();
+            const wait = Math.max(0, nextRefillAt - now);
+            nextRefillAt = Math.max(now, nextRefillAt) + DISPATCH_PACING_MS;
+            if (wait > 0) await sleep(wait);
+          }
           const result = await retryOnceOnTimeout(() =>
             resolveOneAddress(client, input, {
               rethrowBridgeErrors: true,
               signal,
             }),
           );
-          rows[index] = result.resolved
+          return result.resolved
             ? {
                 ...input,
                 resolved: true,
@@ -186,56 +185,28 @@ export function registerResolveAddressesTools(
                 status: "unresolved",
                 error: result.error,
               };
-        } catch (e) {
-          // Abandoned after the deadline: the response has already been
-          // built from the seeded `pending` row — leave it alone.
-          if (e instanceof ResolveAbortedError) return;
-          rows[index] = {
+        },
+        {
+          deadlineMs: RESOLVE_DEADLINE_MS,
+          concurrency: BRIDGE_CONCURRENCY,
+          onTimeout: (input) => ({
             ...input,
             resolved: false,
-            // #133: a sign-in / WAF challenge / 403 / 429 is not a miss.
-            status: isBlockedError(e) ? "blocked" : "unresolved",
-            error: classifyRowError(e).message,
-          };
-        }
-      };
-
-      // Bounded worker pool with paced dispatch (mirrors redfin/zillow).
-      // A shared cursor keeps at most BRIDGE_CONCURRENCY (=6) fetches in
-      // flight continuously — a slow row never starves the others behind
-      // it the way barrier-synced chunks would. The pool fills up front
-      // (so a healthy batch runs at full concurrency), then each worker's
-      // *subsequent* dispatch is spaced through a shared "next allowed
-      // dispatch" clock — so as fast rows free up workers, refills trickle
-      // out ~DISPATCH_PACING_MS apart instead of re-stampeding the bridge
-      // all at once (round-3 #78). The whole sweep races the overall
-      // deadline: on timeout we return whatever's settled so far, with the
-      // rest left as their seeded `'pending'` markers.
-      const fanOut = (async () => {
-        const poolSize = Math.min(BRIDGE_CONCURRENCY, ts.length);
-        let cursor = poolSize; // first `poolSize` indices fill the pool
-        let nextRefillAt = 0;
-        const worker = async (firstIndex: number): Promise<void> => {
-          await resolveInto(firstIndex);
-          while (!signal.aborted && cursor < ts.length) {
-            const index = cursor++;
-            // Stagger refills on a shared clock so freed workers don't
-            // all re-dispatch on the same tick.
-            const now = Date.now();
-            const wait = Math.max(0, nextRefillAt - now);
-            nextRefillAt = Math.max(now, nextRefillAt) + DISPATCH_PACING_MS;
-            if (wait > 0) await sleep(wait);
-            if (signal.aborted) return;
-            await resolveInto(index);
-          }
-        };
-        await Promise.all(
-          Array.from({ length: poolSize }, (_, i) => worker(i)),
-        );
-      })();
-
-      const outcome = await withDeadline(fanOut, RESOLVE_DEADLINE_MS);
-      if (outcome.timedOut) controller.abort();
+            status: "pending",
+            error: "timeout",
+          }),
+          onError: (input, _index, e) =>
+            e instanceof ResolveAbortedError
+              ? { ...input, resolved: false, status: "pending", error: "timeout" }
+              : {
+                  ...input,
+                  resolved: false,
+                  // #133: a sign-in / WAF challenge / 403 / 429 is not a miss.
+                  status: isBlockedError(e) ? "blocked" : "unresolved",
+                  error: classifyRowError(e).message,
+                },
+        },
+      );
 
       return minifiedResult({
         count: rows.length,
