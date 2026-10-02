@@ -227,6 +227,36 @@ describe('homes_resolve_addresses overall deadline', () => {
     expect(atReturn).toBeLessThanOrEqual(12);
   });
 
+  it('stops an in-flight row before its next rung once the deadline fires (signal reaches resolveOneAddress)', async () => {
+    // Three rungs per address (typeahead → slug → search fallback), each
+    // taking 30s. Rows 0-5 start at t=0; typeahead settles at 30s, the slug
+    // rung runs 30-60s, and the deadline fires at 50s. The search-fallback
+    // rung (t=60s) must never be dialled for any row.
+    const json = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) =>
+          setTimeout(() => resolve({ suggestions: [] }), 30_000)
+        )
+    );
+    const html = vi.fn(
+      () =>
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve('<html></html>'), 30_000)
+        )
+    );
+    const client = { fetchHtml: html, fetchJson: json } as unknown as HomesClient;
+    const th = await createTestHarness((server) =>
+      registerResolveAddressesTools(server, client)
+    );
+    const call = th.callTool('homes_resolve_addresses', { addresses: sixty.slice(0, 6) });
+    await vi.advanceTimersByTimeAsync(RESOLVE_DEADLINE_MS + 1000);
+    await call;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    // 6 slug-rung fetches, and no search-fallback fetch after the deadline.
+    expect(html.mock.calls.length).toBe(6);
+    await th.close();
+  });
+
   it('keeps rows that resolved before the deadline and marks the rest pending', async () => {
     // First 6 addresses resolve fast; everything else hangs forever.
     dlFetchHtml.mockImplementation((path: string) => {

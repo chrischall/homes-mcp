@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { registerMortgageTools } from '../../src/tools/mortgage.js';
+import { MAX_LOAN_TERM_YEARS } from '@chrischall/realty-core';
 import { createTestHarness, parseToolResult } from '../helpers.js';
 
 let harness: Awaited<ReturnType<typeof createTestHarness>>;
@@ -45,5 +46,35 @@ describe('homes_calculate_mortgage tool', () => {
     });
     const parsed = parseToolResult<{ monthly_pmi: number }>(r);
     expect(parsed.monthly_pmi).toBeGreaterThan(0);
+  });
+
+  it('keeps the lean output contract (ltv as 0..1, no interest_rate echo)', async () => {
+    const r = await harness.callTool('homes_calculate_mortgage', {
+      home_price: 500_000,
+      interest_rate: 6,
+      down_payment_percent: 20,
+    });
+    const parsed = parseToolResult<Record<string, unknown>>(r);
+    expect(parsed.ltv).toBe(0.8);
+    expect(parsed).toHaveProperty('monthly_total_piti');
+    expect(parsed).toHaveProperty('total_interest_over_term');
+    expect(parsed).not.toHaveProperty('interest_rate');
+    expect(parsed).not.toHaveProperty('total_paid_over_loan');
+  });
+
+  it('rejects loan_term_years above MAX_LOAN_TERM_YEARS at the schema (fleet-audit#1021)', async () => {
+    const r = await harness.callTool('homes_calculate_mortgage', {
+      home_price: 500_000,
+      interest_rate: 6,
+      loan_term_years: MAX_LOAN_TERM_YEARS + 1,
+    });
+    expect(r.isError).toBe(true);
+  });
+
+  it('advertises the realty-core year caps in its input schema (fleet-audit#1021)', async () => {
+    const { tools } = await harness.client.listTools();
+    const tool = tools.find((t) => t.name === 'homes_calculate_mortgage');
+    const props = tool!.inputSchema.properties as Record<string, { maximum?: number }>;
+    expect(props.loan_term_years.maximum).toBe(MAX_LOAN_TERM_YEARS);
   });
 });

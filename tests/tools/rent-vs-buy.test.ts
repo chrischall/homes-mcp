@@ -3,6 +3,7 @@ import {
   estimateRentVsBuy,
   registerRentVsBuyTools,
 } from '../../src/tools/rent-vs-buy.js';
+import { MAX_HORIZON_YEARS, MAX_LOAN_TERM_YEARS } from '@chrischall/realty-core';
 import { createTestHarness, parseToolResult } from '../helpers.js';
 
 describe('estimateRentVsBuy', () => {
@@ -132,5 +133,49 @@ describe('homes_estimate_rent_vs_buy tool', () => {
     );
     expect(p.cumulative_buy_cost).toHaveLength(5);
     expect(p.cumulative_rent_cost).toHaveLength(5);
+  });
+
+  const rvbBase = {
+    home_price: 500000,
+    down_payment: 100000,
+    interest_rate: 6.5,
+    monthly_rent: 2500,
+  };
+
+  it('rejects horizon_years above MAX_HORIZON_YEARS at the schema, before any projection (fleet-audit#1021)', async () => {
+    const r = await h.callTool('homes_estimate_rent_vs_buy', {
+      ...rvbBase,
+      horizon_years: 100_000_000,
+    });
+    expect(r.isError).toBe(true);
+    const ok = await h.callTool('homes_estimate_rent_vs_buy', {
+      ...rvbBase,
+      horizon_years: MAX_HORIZON_YEARS,
+    });
+    expect(ok.isError).toBeFalsy();
+  });
+
+  it('rejects loan_term_years above MAX_LOAN_TERM_YEARS at the schema (fleet-audit#1021)', async () => {
+    const r = await h.callTool('homes_estimate_rent_vs_buy', {
+      ...rvbBase,
+      loan_term_years: MAX_LOAN_TERM_YEARS + 1,
+    });
+    expect(r.isError).toBe(true);
+  });
+
+  it('rejects a down_payment larger than home_price', async () => {
+    const r = await h.callTool('homes_estimate_rent_vs_buy', {
+      ...rvbBase,
+      down_payment: 600000,
+    });
+    expect(r.isError).toBe(true);
+  });
+
+  it('advertises the realty-core year caps in its input schema (fleet-audit#1021)', async () => {
+    const { tools } = await h.client.listTools();
+    const tool = tools.find((t) => t.name === 'homes_estimate_rent_vs_buy');
+    const props = tool!.inputSchema.properties as Record<string, { maximum?: number }>;
+    expect(props.horizon_years.maximum).toBe(MAX_HORIZON_YEARS);
+    expect(props.loan_term_years.maximum).toBe(MAX_LOAN_TERM_YEARS);
   });
 });

@@ -1,4 +1,5 @@
-import { minifiedResult, resolveView, stripMediaUrls, viewParam, type View } from '@chrischall/mcp-utils';
+import * as mcpUtils from '@chrischall/mcp-utils';
+import { makeViewHelpers, REALTY_VIEWS } from '@chrischall/realty-core';
 
 /**
  * The rungs this server honours (`@chrischall/mcp-utils`' `view` vocabulary;
@@ -20,15 +21,7 @@ import { minifiedResult, resolveView, stripMediaUrls, viewParam, type View } fro
  * this one and will save considerably more. Until then this is the honest
  * ceiling, and this docblock says so rather than implying a shape was checked.
  */
-export const HM_VIEWS = ['compact', 'full'] as const;
-
-const NOTE =
-  'compact strips image/avatar URLs from the response; "full" returns Homes.com\'s payload untouched. ' +
-  'No field projection: this server has no verified record of which Homes.com fields matter, and inventing ' +
-  'one would risk dropping a field a caller needs.';
-
-/** The `view` parameter every read tool in this server takes. */
-export const viewArg = (): ReturnType<typeof viewParam> => viewParam(HM_VIEWS, { note: NOTE });
+export const HM_VIEWS = REALTY_VIEWS;
 
 /**
  * Keys THIS repo mints, which the fleet's media rule cannot be expected to know.
@@ -65,17 +58,20 @@ export const viewArg = (): ReturnType<typeof viewParam> => viewParam(HM_VIEWS, {
 const DROP = ['primary_photo_url', 'floorplan_urls'] as const;
 
 /**
- * Answer in the requested rung.
+ * `viewArg` — the `view` parameter every read tool in this server takes —
+ * and `viewResponse`, which answers in the requested rung. Both come from
+ * realty-core's shared `makeViewHelpers` (fleet-audit#1175); the note is
+ * `compactNote('Homes.com')`, the wording this file used to spell out.
  *
- * Only ever called from a READ tool. A write's response is a receipt — an id,
- * a status — with nothing to strip and everything to keep.
+ * `viewResponse` is only ever called from a READ tool. A write's response is
+ * a receipt — an id, a status — with nothing to strip and everything to keep.
  *
- * **Never wire this onto a tool whose PRODUCT is the image.**
+ * **Never wire it onto a tool whose PRODUCT is the image.**
  * `homes_get_property_photos` exists to return exactly these URLs; compact
  * there would not shrink the response, it would empty it (`photos` is itself a
  * media key). That tool returns `minifiedResult` directly and must keep doing so.
  */
-export function viewResponse(view: string | undefined, data: unknown): ReturnType<typeof minifiedResult> {
-  const rung: View = resolveView(view, HM_VIEWS);
-  return minifiedResult(rung === 'compact' ? stripMediaUrls(data, { drop: DROP }) : data);
-}
+export const { viewArg, viewResponse } = makeViewHelpers(mcpUtils, {
+  portal: 'Homes.com',
+  drop: DROP,
+});

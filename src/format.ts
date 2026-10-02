@@ -77,7 +77,12 @@ export function hoaToMonthlyUsd(
   frequency: string | undefined
 ): number | null {
   if (amount === 0 && frequency) return 0;
-  return coreHoaToMonthlyUsd(amount, frequency);
+  // realty-core >= 0.5 never writes to the console (fleet-audit#664); keep
+  // homes' stderr breadcrumb for frequency vocabulary we don't recognise.
+  return coreHoaToMonthlyUsd(amount, frequency, {
+    onUnknownFrequency: (raw) =>
+      console.error(`[homes-mcp] hoaToMonthlyUsd: unknown HOA frequency "${raw}"`),
+  });
 }
 
 /**

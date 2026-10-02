@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { runBoundedBatch } from "@chrischall/mcp-utils";
 import {
   BRIDGE_CONCURRENCY,
   classifyRowError,
-  mapWithConcurrency,
   retryOnceOnTimeout,
 } from "@chrischall/mcp-utils/fetchproxy";
+import { pivotSummary, runRowBatch, type SummaryRow } from "@chrischall/realty-core";
 import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import {
@@ -18,9 +19,10 @@ import {
 /**
  * Fetch + align N homes.com properties for side-by-side comparison.
  *
- * Per-target failures don't fail the whole call — each row reports an
- * `error` string with the message and the per-row `property` is null.
- * Fetches are concurrent.
+ * Per-target failures don't fail the whole call — each failed row carries
+ * the classified `status` / `error_kind`, `retryable` and `error` (the
+ * cohort row envelope, realty-core `runRowBatch`, fleet-audit#1091).
+ * Fetches are concurrent and the call is deadline-bounded.
  */
 
 export interface CompareTarget {
@@ -28,18 +30,8 @@ export interface CompareTarget {
 }
 
 interface CompareRow {
-  property_id?: string;
   url?: string;
   property?: FormattedProperty;
-  error?: string;
-}
-
-interface SummaryRow {
-  field: string;
-  // Mirrors per-row values verbatim — no string-coercion / no
-  // JSON-encoding. The summary cell value for `hoa_fee` is the same
-  // type as `row.property.hoa_fee` (#18).
-  values: Array<unknown>;
 }
 
 const SUMMARY_FIELDS: Array<keyof FormattedProperty> = [
@@ -61,15 +53,13 @@ const SUMMARY_FIELDS: Array<keyof FormattedProperty> = [
   "price_drop_amount",
 ];
 
-export function buildSummary(rows: CompareRow[]): SummaryRow[] {
-  return SUMMARY_FIELDS.map((field) => ({
-    field,
-    values: rows.map((r) =>
-      r.property
-        ? ((r.property as unknown as Record<string, unknown>)[field] ?? null)
-        : null,
-    ),
-  }));
+/**
+ * The opt-in cross-row `summary` table — realty-core's `pivotSummary`:
+ * each cell is the row's property value verbatim (`undefined` / failed row
+ * → `null`), same type as `row.property[field]` (#18).
+ */
+export function buildSummary(rows: ReadonlyArray<CompareRow>): SummaryRow[] {
+  return pivotSummary<FormattedProperty>(rows, SUMMARY_FIELDS);
 }
 
 export function registerCompareTools(
@@ -135,41 +125,30 @@ export function registerCompareTools(
       // Compare caps at 8 targets so the cap rarely binds, but the
       // distinct-timeout wrapper still matters: a bridge timeout in
       // row 3 of an 8-row compare must not look like a parse error.
-      const rows: CompareRow[] = await mapWithConcurrency(
+      const envelope = await runRowBatch(
         ts,
-        BRIDGE_CONCURRENCY,
         async (t) => {
-          try {
-            const { listing, html } = await retryOnceOnTimeout(() =>
-              fetchListingRecord(client, t),
-            );
-            const formatted = format(listing, html, {
-              includeDescription: include_description,
-              includeAgentContact: include_agent_contact,
-            });
-            return {
-              property_id: formatted.property_id,
-              url: formatted.url,
-              property: formatted,
-            };
-          } catch (e) {
-            return {
-              url: t.url,
-              error: classifyRowError(e).message,
-            };
-          }
+          const { listing, html } = await fetchListingRecord(client, t);
+          const formatted = format(listing, html, {
+            includeDescription: include_description,
+            includeAgentContact: include_agent_contact,
+          });
+          return {
+            property_id: formatted.property_id,
+            url: formatted.url,
+            property: formatted,
+          };
+        },
+        {
+          kit: { runBoundedBatch, classifyRowError, retryOnceOnTimeout },
+          toolLabel: "homes_compare_properties",
+          rowBase: (t) => ({ url: t.url }),
+          concurrency: BRIDGE_CONCURRENCY,
         },
       );
-      const payload: {
-        count: number;
-        summary?: SummaryRow[];
-        results: CompareRow[];
-      } = {
-        count: rows.length,
-        results: rows,
-      };
+      const payload: typeof envelope & { summary?: SummaryRow[] } = envelope;
       if (include_summary) {
-        payload.summary = buildSummary(rows);
+        payload.summary = buildSummary(envelope.results);
       }
       return viewResponse(view, payload);
     },

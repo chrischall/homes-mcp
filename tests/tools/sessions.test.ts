@@ -169,4 +169,11 @@ describe('session tool descriptions (fleet-audit #135)', () => {
       expect(text).toMatch(/does not (change|switch) which .*account/i);
     }
   });
+
+  it('each description says what DOES pick the account — the signed-in browser tab', async () => {
+    const d = await descriptions();
+    for (const text of Object.values(d)) {
+      expect(text).toMatch(/browser tab the ContextMint Bridge extension is signed into/);
+    }
+  });
 });
