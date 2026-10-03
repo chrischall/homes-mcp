@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.1.7](https://github.com/chrischall/homes-mcp/compare/v2.1.6...v2.1.7) (2026-10-03)
+
+
+### Bug Fixes
+
+* **compare:** document the row envelope in homes_compare_properties ([#258](https://github.com/chrischall/homes-mcp/issues/258)) ([823c7f7](https://github.com/chrischall/homes-mcp/commit/823c7f7e6570af4466d25df1d4d06d1e25dc491b))
+* **deps:** adopt @chrischall/mcp-utils 2.12.0 and realty-core 0.5.1 shared tools ([#256](https://github.com/chrischall/homes-mcp/issues/256)) ([b60a42b](https://github.com/chrischall/homes-mcp/commit/b60a42b94b900120480c392fac60f5b6c85e4229))
+* **deps:** bump @chrischall/mcp-utils to 2.13.0 and realty-core to 0.6.0 ([#259](https://github.com/chrischall/homes-mcp/issues/259)) ([e7ccc3b](https://github.com/chrischall/homes-mcp/commit/e7ccc3b7c11d6ba62e41646c5cdb34ef549944ed))
+* keep credentials and report edge_blocked on CDN/WAF blocks (mcp-utils 2.10.0) ([#255](https://github.com/chrischall/homes-mcp/issues/255)) ([c4a0979](https://github.com/chrischall/homes-mcp/commit/c4a0979879cf3893e913dba94cead300dde5f993))
+* report CDN/WAF blocks as edge_blocked, not a rejected credential (mcp-utils 2.9.0) ([#253](https://github.com/chrischall/homes-mcp/issues/253)) ([318e2c8](https://github.com/chrischall/homes-mcp/commit/318e2c8f590d6f4258c6ba69c0304f6539eb3037))
+
 ## [2.1.6](https://github.com/chrischall/homes-mcp/compare/v2.1.5...v2.1.6) (2026-09-28)
 
 
