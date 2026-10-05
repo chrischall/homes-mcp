@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.8](https://github.com/chrischall/homes-mcp/compare/v2.1.7...v2.1.8) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** require @chrischall/mcp-utils 2.14.0 and MCP SDK 2.3.0 ([#260](https://github.com/chrischall/homes-mcp/issues/260)) ([5fa2316](https://github.com/chrischall/homes-mcp/commit/5fa2316f60014cae5c449bb1ff3d8a012c0c1ed3))
+
 ## [2.1.7](https://github.com/chrischall/homes-mcp/compare/v2.1.6...v2.1.7) (2026-10-03)
 
 
