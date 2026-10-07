@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.9](https://github.com/chrischall/homes-mcp/compare/v2.1.8...v2.1.9) (2026-10-07)
+
+
+### Bug Fixes
+
+* **deps:** bump @fetchproxy/server ([#264](https://github.com/chrischall/homes-mcp/issues/264)) ([b8153bd](https://github.com/chrischall/homes-mcp/commit/b8153bde285826a0780f7b556c987c73a9755257))
+* **deps:** sharper address parsing and fetchproxy relay fixes from first-party updates ([#266](https://github.com/chrischall/homes-mcp/issues/266)) ([3a5e831](https://github.com/chrischall/homes-mcp/commit/3a5e83166ff21b1eb83ac8cf347c342dcb256dba))
+
 ## [2.1.8](https://github.com/chrischall/homes-mcp/compare/v2.1.7...v2.1.8) (2026-10-05)
 
 
