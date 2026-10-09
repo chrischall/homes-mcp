@@ -38,6 +38,21 @@ describe('buildSearchPath', () => {
   });
 });
 
+describe('buildSearchPath — unsluggable locations (fleet-audit#497)', () => {
+  it.each(['', '   ', '!!!', '東京', 'Москва'])(
+    'throws a clear error instead of building "//" for %j',
+    (location) => {
+      expect(() => buildSearchPath({ location })).toThrow(
+        /could not turn location .* into a homes\.com location slug/,
+      );
+    },
+  );
+
+  it('still accepts a location with some Latin characters', () => {
+    expect(buildSearchPath({ location: 'São Paulo' })).toBe('/sao-paulo/');
+  });
+});
+
 describe('buildSearchPath — extended filters', () => {
   it('property_type=single_family → /houses-for-sale/', () => {
     expect(
@@ -478,6 +493,13 @@ describe('homes_search_properties tool', () => {
     expect(parsed.count).toBe(2);
     expect(parsed.results.map((x) => x.property_id)).toEqual(['aaa', 'bbb']);
     expect(parsed.results[0].price).toBe(500000);
+  });
+
+  it('rejects an empty location at the schema without fetching (fleet-audit#497)', async () => {
+    mockFetchHtml.mockClear();
+    const r = await harness.callTool('homes_search_properties', { location: '' });
+    expect(r.isError).toBe(true);
+    expect(mockFetchHtml).not.toHaveBeenCalled();
   });
 
   it('respects limit', async () => {

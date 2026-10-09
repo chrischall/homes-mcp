@@ -52,39 +52,56 @@ export interface JsonLdNode {
 import { parseHtml } from './html.js';
 
 /**
- * Find and parse the first `<script type="application/ld+json">` block
- * in `html`. Returns the parsed JSON-LD document, or null when no such
- * block exists or it fails to parse.
+ * Find and parse every `<script type="application/ld+json">` block in
+ * `html` and merge their nodes into one `{ @context, @graph }` document.
+ * Returns null when no block exists, none parses, or none carries a node.
  *
  * Uses `node-html-parser` so attribute values are HTML-entity-decoded
  * before matching — homes.com emits `application/ld&#x2B;json` in the
  * raw SSR, and a literal-text regex would miss it.
  *
- * If a page emits the JSON-LD as a single root node (rather than the
- * `{ @context, @graph }` envelope), we wrap it into a synthetic graph
- * with that node as the sole element. This keeps `findGraphNode` happy
- * across both shapes.
+ * Every block contributes (fleet-audit#496): a `WebSite` / `Organization`
+ * block ahead of the listing graph must not hide the `RealEstateListing`
+ * or `CollectionPage` node. Each block may be a `{ @context, @graph }`
+ * envelope, a single root node (no `@graph` — kept as one node), or a
+ * top-level array of either; all are flattened into one graph so
+ * `findGraphNode` sees every node. `@context` comes from the first block
+ * that declares one.
  */
 export function extractJsonLd(html: string): JsonLdDoc | null {
   const root = parseHtml(html);
   const scripts = root.querySelectorAll('script[type="application/ld+json"]');
+  const graph: JsonLdNode[] = [];
+  let context: JsonLdDoc['@context'];
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const v of value) collect(v);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    const doc = value as JsonLdDoc;
+    if (context === undefined && doc['@context'] !== undefined) {
+      context = doc['@context'];
+    }
+    if (Array.isArray(doc['@graph'])) {
+      for (const node of doc['@graph']) {
+        if (node && typeof node === 'object') graph.push(node);
+      }
+    } else if (doc['@type']) {
+      graph.push(doc as JsonLdNode);
+    }
+  };
   for (const script of scripts) {
     const raw = script.textContent.trim();
     if (!raw) continue;
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      collect(JSON.parse(raw));
     } catch {
       continue;
     }
-    if (!parsed || typeof parsed !== 'object') continue;
-    const doc = parsed as JsonLdDoc;
-    if (!doc['@graph'] && doc['@type']) {
-      return { '@context': doc['@context'], '@graph': [doc as JsonLdNode] };
-    }
-    return doc;
   }
-  return null;
+  if (graph.length === 0) return null;
+  return { '@context': context, '@graph': graph };
 }
 
 /**

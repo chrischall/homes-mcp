@@ -4,7 +4,7 @@ import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import { collectAddressAlternates } from "@chrischall/realty-core";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
-import { urlToPath } from "../url.js";
+import { propertyPath } from "../url.js";
 import {
   toNumber,
   firstImage,
@@ -303,10 +303,12 @@ export function extractPropertyId(listing: JsonLdListing): string {
 /**
  * Build the path for a homes.com property URL. The user passes the
  * full URL (from a `homes_search_properties` result's `url` field);
- * we reduce it via `urlToPath` and hand it to the transport.
+ * we reduce it via `propertyPath` (which refuses anything that isn't a
+ * `/property/<slug>/<id>/` detail page — fleet-audit#501) and hand it to
+ * the transport.
  */
 export function buildPath(args: { url?: string }): string {
-  if (args.url) return urlToPath(args.url);
+  if (args.url) return propertyPath(args.url);
   throw new Error("homes property tool: must provide `url`");
 }
 
@@ -654,7 +656,14 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
       out.hoa_fee = 0;
       out.hoa_frequency = "month";
     }
-    const mls = /MLS#?:?\s*([A-Z0-9-]+)/i.exec(finText);
+    // Require the labelled form ("MLS#:", "MLS #", "MLS Number:", "MLS
+    // ID:", "MLS:") and a digit in the id — a bare "MLS" inside a source
+    // name ("Source: Canopy MLS MLS#: 4123") used to yield mls_id "MLS"
+    // (fleet-audit#499).
+    const mls =
+      /\bMLS\s*(?:#|Number\b|ID\b)?\s*:?\s*([A-Z0-9-]*\d[A-Z0-9-]*)/i.exec(
+        finText,
+      );
     if (mls) out.mls_id = mls[1];
     // Source name: one or more uppercase-initial words, but STOP before a
     // word that's immediately followed by a `#`/`:` field label. The old
@@ -669,10 +678,14 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
     if (src) out.mls_source = src[1].trim();
     // Tax — homes.com surfaces "Annual Tax" / "Property Tax" / "Tax".
     // Capture the dollar amount; sentinel cleanup happens in format().
+    // The specific labels win over a generic "Tax"/"Taxes" anywhere in
+    // the text (an earlier "Taxes 2024" used to capture the year), and
+    // the labels are word-anchored (fleet-audit#499).
     const tax =
-      /(?:Annual Tax|Property Tax|Tax(?:es)?)(?: Amount)?:?\s*\$?([0-9,]+)/i.exec(
+      /\b(?:Annual Tax|Property Tax)(?: Amount)?\b\s*:?\s*\$?([0-9,]+)/i.exec(
         finText,
-      );
+      ) ??
+      /\bTax(?:es)?(?: Amount)?\b\s*:?\s*\$?([0-9,]+)/i.exec(finText);
     if (tax) {
       const n = parseDollar(tax[1]);
       if (n !== undefined) out.tax_annual = n;
@@ -684,8 +697,10 @@ function extractDomFields(root: HTMLElement): Partial<FormattedProperty> {
     }
     // Previous list price (when homes.com surfaces a price-history hint
     // in the financial section). Used to derive price_drop_* (#16).
+    // The bare "Was" alternative must be a whole word followed by a "$"
+    // amount — "Roof Was 2019" is not a previous price (fleet-audit#499).
     const prev =
-      /(?:Previous(?:ly)?(?: List(?:ed)?)? Price|Was|Originally listed at)\s*:?\s*\$?([0-9,]+)/i.exec(
+      /\b(?:(?:Previous(?:ly)?(?: List(?:ed)?)? Price|Originally listed at)\s*:?\s*\$?|Was\s*:?\s*\$)([0-9,]+)/i.exec(
         finText,
       );
     if (prev) {

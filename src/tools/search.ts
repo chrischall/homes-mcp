@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
-import { locationToSlug } from "../url.js";
+import { requireLocationSlug } from "../url.js";
 import {
   toNumber,
   firstImage,
@@ -269,7 +269,7 @@ const TYPE_TO_SLUG_RENT: Record<PropertyType, string> = {
  * just floors each bound to an integer dollar amount for the query string.
  */
 export function buildSearchPath(input: SearchInput): string {
-  const slug = locationToSlug(input.location);
+  const slug = requireLocationSlug(input.location);
 
   // The price band rides as a query string on whatever path we build
   // below (it composes with the path facets — verified live). Build it
@@ -370,6 +370,7 @@ export function registerSearchTools(
         view: viewArg(),
         location: z
           .string()
+          .min(1)
           .describe(
             'Free-text location: city, ZIP, neighborhood (e.g. "Atlanta, GA", "Brooklyn, NY", "30311", "Park Slope")',
           ),

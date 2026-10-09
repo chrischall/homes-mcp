@@ -66,4 +66,26 @@ describe('homes_get_market_report tool', () => {
     expect(p.sample_sold).toHaveLength(3);
     expect(p.sample_sold[0].property_id).toBe('aaa');
   });
+
+  it('throws instead of reporting an empty market when the page has no JSON-LD (fleet-audit#496)', async () => {
+    fetch.mockResolvedValueOnce('<html><body>no structured data</body></html>');
+    const r = await h.callTool('homes_get_market_report', { location: 'Brooklyn, NY' });
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r.content)).toMatch(/Could not locate JSON-LD/);
+  });
+
+  it('rejects an unsluggable location without fetching the homepage (fleet-audit#497)', async () => {
+    fetch.mockClear();
+    const r = await h.callTool('homes_get_market_report', { location: '東京' });
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r.content)).toMatch(/could not turn location/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty location at the schema (fleet-audit#497)', async () => {
+    fetch.mockClear();
+    const r = await h.callTool('homes_get_market_report', { location: '' });
+    expect(r.isError).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

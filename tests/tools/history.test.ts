@@ -137,6 +137,21 @@ describe('normalizeEvents (#26)', () => {
     });
   });
 
+  it('keeps a Sold row\'s List to Sale figure out of price_change_pct (fleet-audit#500)', () => {
+    const out = normalizeEvents([
+      { date: '2026-06-01', event: 'Sold', price: 470_000, list_to_sale_pct: 97.9 },
+      { date: '2026-04-01', event: 'Listed', price: 480_000, list_to_sale_pct: 2.1 },
+    ]);
+    expect(out[0]).toEqual({
+      date: '2026-06-01',
+      type: 'Sold',
+      price: 470_000,
+      list_to_sale_pct: 97.9,
+    });
+    expect(out[1]).not.toHaveProperty('price_change_pct');
+    expect(out[1].list_to_sale_pct).toBe(2.1);
+  });
+
   it('drops unmappable rows + emits a stderr warning', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const out = normalizeEvents([
@@ -304,6 +319,19 @@ describe('homes_get_history (combined) tool — #31', () => {
     expect(p.events_normalized.length).toBeGreaterThan(0);
     expect(p.tax_records.length).toBeGreaterThan(0);
   });
+
+  it.each(['homes_get_history', 'homes_get_property_history', 'homes_get_tax_history'])(
+    '%s refuses a non-property path without fetching it (fleet-audit#501)',
+    async (tool) => {
+      fetch3.mockClear();
+      const r = await hc.callTool(tool, {
+        url: 'https://www.homes.com/customer/dashboard/favorites/',
+      });
+      expect(r.isError).toBe(true);
+      expect(JSON.stringify(r.content)).toMatch(/not a homes\.com property detail URL/);
+      expect(fetch3).not.toHaveBeenCalled();
+    },
+  );
 
   it('returns empty series for a listing with no history sections', async () => {
     fetch3.mockResolvedValueOnce(EMPTY);

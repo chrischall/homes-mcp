@@ -77,6 +77,15 @@ describe('homes_get_nearby_listings tool', () => {
     expect(p.listings.every((l: any) => l.tab === 'for_sale')).toBe(true);
   });
 
+  it('refuses a non-property path without fetching it (fleet-audit#501)', async () => {
+    const r = await h.callTool('homes_get_nearby_listings', {
+      url: '/customer/dashboard/saved-searches/',
+    });
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r.content)).toMatch(/not a homes\.com property detail URL/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('respects limit', async () => {
     fetch.mockResolvedValueOnce(FIX);
     const p = parseToolResult<any>(

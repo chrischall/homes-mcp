@@ -38,6 +38,30 @@ describe('buildPath', () => {
   it('throws when no url is provided', () => {
     expect(() => buildPath({})).toThrow(/must provide `url`/);
   });
+
+  it('keeps a query string on a property-detail path', () => {
+    expect(buildPath({ url: 'https://www.homes.com/property/foo/abc123/?ref=search' })).toBe(
+      '/property/foo/abc123/?ref=search'
+    );
+  });
+
+  it('accepts a property path without the trailing slash', () => {
+    expect(buildPath({ url: '/property/foo/abc123' })).toBe('/property/foo/abc123');
+  });
+
+  it.each([
+    'https://www.homes.com/customer/dashboard/favorites/',
+    '/customer/dashboard/saved-searches/',
+    'https://www.homes.com/sign-out',
+    'https://www.homes.com/atlanta-ga/',
+    '/property/abc123/',
+    '/property/foo/abc123/extra/',
+    '/property/x/../../customer/dashboard/',
+    '/property/%2e%2e/%2e%2e/customer/',
+    '/property/./abc/',
+  ])('rejects a non-property-detail path %j (fleet-audit#501)', (url) => {
+    expect(() => buildPath({ url })).toThrow(/not a homes\.com property detail URL/);
+  });
 });
 
 describe('extractPropertyId', () => {
@@ -728,6 +752,50 @@ describe('homes_get_property — sentinel + alternates pinned via JSON-LD shim',
     expect(p.previous_list_price).toBe(550000);
     expect(p.price_drop_amount).toBe(50000);
     expect(p.price_drop_percent).toBeCloseTo(9.1, 1);
+  });
+
+  const finFields = async (finText: string) => {
+    fetch2.mockResolvedValueOnce(htmlWithFinSection(finText));
+    return parseToolResult<any>(
+      await h.callTool('homes_get_property', {
+        url: 'https://www.homes.com/property/x/abc/',
+      })
+    );
+  };
+
+  it('takes mls_id from the labelled MLS# field, not a bare "MLS" in the source name (fleet-audit#499)', async () => {
+    const p = await finFields('Source: Canopy MLS MLS#: 4123456 Status: Active');
+    expect(p.mls_id).toBe('4123456');
+  });
+
+  it('accepts the "MLS Number:" label form (fleet-audit#499)', async () => {
+    const p = await finFields('MLS Number: CAR4123456. Source: Canopy MLS');
+    expect(p.mls_id).toBe('CAR4123456');
+  });
+
+  it('omits mls_id when no labelled MLS id is present (fleet-audit#499)', async () => {
+    const p = await finFields('Source: Stellar MLS. Status: Active');
+    expect(p.mls_id).toBeUndefined();
+  });
+
+  it('does not read a year after a bare "Was" as the previous list price (fleet-audit#499)', async () => {
+    const p = await finFields('Roof Was 2019. Washer 2 included.');
+    expect(p.previous_list_price).toBeUndefined();
+  });
+
+  it('still reads "Was $<price>" as the previous list price (fleet-audit#499)', async () => {
+    const p = await finFields('Roof Was 2019. Was $600,000.');
+    expect(p.previous_list_price).toBe(600000);
+  });
+
+  it('prefers the labelled annual tax amount over an earlier loose "Taxes <year>" (fleet-audit#499)', async () => {
+    const p = await finFields('Taxes 2024 Annual Tax Amount: $4,321');
+    expect(p.tax_annual).toBe(4321);
+  });
+
+  it('does not match "tax" inside another word (fleet-audit#499)', async () => {
+    const p = await finFields('Syntax 12 Tax: $3,100');
+    expect(p.tax_annual).toBe(3100);
   });
 
   it('does not over-capture mls_source when another labelled field follows on the same line', async () => {

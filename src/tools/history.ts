@@ -10,7 +10,7 @@ import {
   parsePercent,
   type HTMLElement,
 } from "../html.js";
-import { urlToPath } from "../url.js";
+import { propertyPath } from "../url.js";
 import { lastPathSegment } from "../jsonld.js";
 import {
   mapEventType,
@@ -56,9 +56,15 @@ export interface NormalizedEvent {
   date: string;
   type: NormalizedEventType;
   price?: number;
+  /** Only on `PriceChange` rows — the change from the previous price. */
   price_change_pct?: number;
-  dom?: number;
-  source_mls?: string;
+  /**
+   * homes.com's "List to Sale" column on every other row type (e.g. the
+   * sale-to-list ratio on a `Sold` row). Kept under its own key so the
+   * cross-MCP `price_change_pct` never carries a non-price-change figure
+   * (fleet-audit#500).
+   */
+  list_to_sale_pct?: number;
 }
 
 /**
@@ -84,7 +90,11 @@ export function normalizeEvents(events: ListingEvent[]): NormalizedEvent[] {
     const rec: NormalizedEvent = { date: e.date, type };
     if (typeof e.price === "number") rec.price = e.price;
     if (typeof e.list_to_sale_pct === "number") {
-      rec.price_change_pct = e.list_to_sale_pct;
+      // On a PriceChange row the "List to Sale" column is the change from
+      // the previous price; on any other row (notably Sold) it is a
+      // list-to-sale figure, which must not masquerade as a price change.
+      if (type === "PriceChange") rec.price_change_pct = e.list_to_sale_pct;
+      else rec.list_to_sale_pct = e.list_to_sale_pct;
     }
     out.push(rec);
   }
@@ -246,7 +256,7 @@ export function registerHistoryTools(
       }),
     },
     async ({ url }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const listing_events = parsePropertyHistory(root);
@@ -280,7 +290,7 @@ export function registerHistoryTools(
       }),
     },
     async ({ url }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       return minifiedResult({
@@ -311,7 +321,7 @@ export function registerHistoryTools(
       }),
     },
     async ({ url }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const listing_events = parsePropertyHistory(root);

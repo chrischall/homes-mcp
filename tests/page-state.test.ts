@@ -68,6 +68,46 @@ describe('extractJsonLd', () => {
     expect(doc?.['@graph']).toHaveLength(1);
     expect(doc?.['@graph']?.[0]?.['@type']).toBe('RealEstateListing');
   });
+
+  it('merges nodes from every ld+json block, not just the first (fleet-audit#496)', () => {
+    // A WebSite / Organization block ahead of the listing graph must not
+    // hide the RealEstateListing node.
+    const html = `
+      <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"Homes.com"}</script>
+      <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"CoStar"}</script>
+      <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":["RealEstateListing","Product"],"name":"L"},{"@type":"BreadcrumbList"}]}</script>`;
+    const doc = extractJsonLd(html);
+    expect(findGraphNode(doc, 'RealEstateListing')?.name).toBe('L');
+    expect(findGraphNode(doc, 'WebSite')?.name).toBe('Homes.com');
+    expect(doc?.['@context']).toBe('https://schema.org');
+  });
+
+  it('flattens a top-level JSON-LD array into the graph (fleet-audit#496)', () => {
+    const html = `<script type="application/ld+json">[
+      {"@context":"https://schema.org","@type":"WebSite"},
+      {"@context":"https://schema.org","@type":"CollectionPage","name":"P"}
+    ]</script>`;
+    const doc = extractJsonLd(html);
+    expect(findGraphNode(doc, 'CollectionPage')?.name).toBe('P');
+    expect(doc?.['@graph']).toHaveLength(2);
+  });
+
+  it('flattens @graph envelopes nested inside a top-level array', () => {
+    const html = `<script type="application/ld+json">[
+      {"@context":"https://schema.org","@graph":[{"@type":"CollectionPage","name":"Q"}]},
+      null, 7
+    ]</script>`;
+    const doc = extractJsonLd(html);
+    expect(findGraphNode(doc, 'CollectionPage')?.name).toBe('Q');
+    expect(doc?.['@graph']).toHaveLength(1);
+  });
+
+  it('returns null when every block parses to something with no nodes', () => {
+    const html = `<script type="application/ld+json">[]</script>
+      <script type="application/ld+json">"just a string"</script>
+      <script type="application/ld+json">{"@context":"https://schema.org"}</script>`;
+    expect(extractJsonLd(html)).toBeNull();
+  });
 });
 
 describe('nodeHasType', () => {
