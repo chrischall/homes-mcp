@@ -347,3 +347,20 @@ describe('homes_get_history (combined) tool — #31', () => {
     expect(p.tax_records).toEqual([]);
   });
 });
+
+describe('history tool descriptions document the events_normalized contract (fleet-audit#500)', () => {
+  it.each(['homes_get_history', 'homes_get_property_history'])(
+    '%s says price_change_pct is PriceChange-only and other rows carry list_to_sale_pct',
+    async (name) => {
+      const c = { fetchHtml: vi.fn() } as unknown as HomesClient;
+      const th = await createTestHarness((s) => registerHistoryTools(s, c));
+      try {
+        const tool = (await th.listTools()).find((t) => t.name === name);
+        expect(tool?.description).toMatch(/`price_change_pct` only on `PriceChange` rows/);
+        expect(tool?.description).toMatch(/`list_to_sale_pct`/);
+      } finally {
+        await th.close();
+      }
+    },
+  );
+});

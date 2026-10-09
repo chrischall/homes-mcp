@@ -243,7 +243,7 @@ export function registerHistoryTools(
       title:
         "Get homes.com property history (DEPRECATED — use homes_get_history)",
       description:
-        "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_price_history: true })`. Same data, fewer round trips. Will be removed in a future major version. Three timelines for a homes.com property in one call: `listing_events`, `ownership_events`, `lien_events`. Also returns `events_normalized` mapped onto the cross-MCP enum.",
+        "DEPRECATED — prefer `homes_get_history` (combined timelines + tax) or `homes_get_property({ url, include_price_history: true })`. Same data, fewer round trips. Will be removed in a future major version. Three timelines for a homes.com property in one call: `listing_events`, `ownership_events`, `lien_events`. Also returns `events_normalized` mapped onto the cross-MCP enum. Each `events_normalized` row is `{ date, type, price?, price_change_pct?, list_to_sale_pct? }` — `price_change_pct` only on `PriceChange` rows; every other row carries homes.com's \"List to Sale\" figure as `list_to_sale_pct` (e.g. the sale-to-list ratio on a `Sold` row), never as a price change.",
       annotations: {
         title:
           "Get homes.com property history (DEPRECATED — use homes_get_history)",
@@ -309,7 +309,7 @@ export function registerHistoryTools(
     {
       title: "Get homes.com property + tax history (combined)",
       description:
-        "Combined history endpoint — replaces `homes_get_property_history` + `homes_get_tax_history` with a single fetch. Returns `{ property_id, url, listing_events, ownership_events, lien_events, events_normalized, tax_records }`. Pass `url` — the full property detail URL. Series are `[]` when the listing doesn't carry that section. Cross-MCP-normalized `events_normalized` carries the same enum across siblings (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted). Read-only; safe to call repeatedly.",
+        "Combined history endpoint — replaces `homes_get_property_history` + `homes_get_tax_history` with a single fetch. Returns `{ property_id, url, listing_events, ownership_events, lien_events, events_normalized, tax_records }`. Pass `url` — the full property detail URL. Series are `[]` when the listing doesn't carry that section. Cross-MCP-normalized `events_normalized` carries the same enum across siblings (Listed/PriceChange/Pending/Contingent/Sold/Withdrawn/Relisted/Delisted). Each `events_normalized` row is `{ date, type, price?, price_change_pct?, list_to_sale_pct? }` — `price_change_pct` only on `PriceChange` rows; every other row carries homes.com's \"List to Sale\" figure as `list_to_sale_pct` (e.g. the sale-to-list ratio on a `Sold` row), never as a price change. Read-only; safe to call repeatedly.",
       annotations: {
         title: "Get homes.com property + tax history (combined)",
         readOnlyHint: true,

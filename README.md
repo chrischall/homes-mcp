@@ -20,7 +20,7 @@ homes.com real-estate access as an MCP server for Claude — search listings, re
 | `homes_bulk_get` | Fetch up to 200 properties' structured records in one call (per-row errors, input order preserved). |
 | `homes_compare_properties` | Side-by-side comparison of 2–8 properties with an aligned summary table. Per-target errors captured per-row. Concurrent fetches. |
 | `homes_get_nearby_listings` | The "Homes for Sale Near This Property" cross-link cards from a detail page (For Sale, optionally Rentals). URL + address only. |
-| `homes_get_history` | Combined price + tax history in one fetch: `listing_events`, `ownership_events`, `lien_events`, normalized `events_normalized`, and `tax_records`. |
+| `homes_get_history` | Combined price + tax history in one fetch: `listing_events`, `ownership_events`, `lien_events`, normalized `events_normalized`, and `tax_records`. `events_normalized` sets `price_change_pct` only on `PriceChange` rows; other rows carry homes.com's "List to Sale" figure as `list_to_sale_pct` (no `dom` / `source_mls` keys). |
 | `homes_get_property_history` | *Deprecated* — price/ownership/lien timelines only. Prefer `homes_get_history`. |
 | `homes_get_tax_history` | *Deprecated* — year-by-year tax records only. Prefer `homes_get_history`. |
 | `homes_get_market_report` | Median / average / $-per-sqft for a market, derived from the `sold` search page's JSON-LD. |
