@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.10](https://github.com/chrischall/homes-mcp/compare/v2.1.9...v2.1.10) (2026-10-09)
+
+
+### Bug Fixes
+
+* annotate tools truthfully and sync manifests with the served tools ([#273](https://github.com/chrischall/homes-mcp/issues/273)) ([a9549cb](https://github.com/chrischall/homes-mcp/commit/a9549cb0c2e14da76292720360f1c442578f0179))
+* declare the plugin MCP config under the mcpServers key Claude Code reads ([#274](https://github.com/chrischall/homes-mcp/issues/274)) ([f0c6ec7](https://github.com/chrischall/homes-mcp/commit/f0c6ec729eee9a776002bf1ccf810a9cc5bc35bf))
+* **deps:** bump source-map-js ([#272](https://github.com/chrischall/homes-mcp/issues/272)) ([7ba5b47](https://github.com/chrischall/homes-mcp/commit/7ba5b47fe09ad13c9f5d477de6457960638944f8))
+* **deps:** update @chrischall/mcp-utils to 3.0.0 ([#271](https://github.com/chrischall/homes-mcp/issues/271)) ([87f27c0](https://github.com/chrischall/homes-mcp/commit/87f27c0fc4d3dea373454e2bc8681bba7feaa3a3))
+* resolve low-severity audit findings ([#267](https://github.com/chrischall/homes-mcp/issues/267)) ([2e0ca43](https://github.com/chrischall/homes-mcp/commit/2e0ca438345b970775d54862eee3d095339cecab))
+
+
+### Documentation
+
+* state the history row shape and blank-location error in tool descriptions ([#270](https://github.com/chrischall/homes-mcp/issues/270)) ([e0f5e4e](https://github.com/chrischall/homes-mcp/commit/e0f5e4e48fb7c3c7df41bb22da3c6e5a416ab2a6))
+
 ## [2.1.9](https://github.com/chrischall/homes-mcp/compare/v2.1.8...v2.1.9) (2026-10-07)
 
 
