@@ -137,6 +137,21 @@ describe('normalizeEvents (#26)', () => {
     });
   });
 
+  it('keeps a Sold row\'s List to Sale figure out of price_change_pct (fleet-audit#500)', () => {
+    const out = normalizeEvents([
+      { date: '2026-06-01', event: 'Sold', price: 470_000, list_to_sale_pct: 97.9 },
+      { date: '2026-04-01', event: 'Listed', price: 480_000, list_to_sale_pct: 2.1 },
+    ]);
+    expect(out[0]).toEqual({
+      date: '2026-06-01',
+      type: 'Sold',
+      price: 470_000,
+      list_to_sale_pct: 97.9,
+    });
+    expect(out[1]).not.toHaveProperty('price_change_pct');
+    expect(out[1].list_to_sale_pct).toBe(2.1);
+  });
+
   it('drops unmappable rows + emits a stderr warning', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const out = normalizeEvents([
