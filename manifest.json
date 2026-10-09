@@ -30,7 +30,25 @@
       "command": "node",
       "args": [
         "${__dirname}/dist/bundle.js"
-      ]
+      ],
+      "env": {
+        "HOMES_WS_PORT": "${user_config.homes_ws_port}",
+        "HOMES_COMMUNITIES_FILE": "${user_config.homes_communities_file}"
+      }
+    }
+  },
+  "user_config": {
+    "homes_ws_port": {
+      "type": "string",
+      "title": "fetchproxy WebSocket port",
+      "description": "Override the fetchproxy WebSocket port (default 37149).",
+      "required": false
+    },
+    "homes_communities_file": {
+      "type": "file",
+      "title": "Communities file",
+      "description": "Path to a JSON array of community names for feature extraction; overrides the built-in Lake Lure / mountain-NC default vocabulary.",
+      "required": false
     }
   },
   "tools": [
@@ -61,6 +79,62 @@
     {
       "name": "homes_healthcheck",
       "description": "Verify the ContextMint Bridge connection end-to-end"
+    },
+    {
+      "name": "homes_get_property_history",
+      "description": "DEPRECATED — use homes_get_history; homes.com property / purchase / mortgage history"
+    },
+    {
+      "name": "homes_get_tax_history",
+      "description": "DEPRECATED — use homes_get_history; homes.com property tax history"
+    },
+    {
+      "name": "homes_get_history",
+      "description": "Combined homes.com price + tax history in a single fetch"
+    },
+    {
+      "name": "homes_get_nearby_listings",
+      "description": "Nearby active listings from a homes.com property's detail page"
+    },
+    {
+      "name": "homes_get_market_report",
+      "description": "Recently-sold market summary for a city/ZIP/neighborhood: count, median sale price, average $/sqft"
+    },
+    {
+      "name": "homes_get_saved_homes",
+      "description": "The signed-in user's saved (favorited) homes on homes.com"
+    },
+    {
+      "name": "homes_get_saved_searches",
+      "description": "The signed-in user's saved searches on homes.com"
+    },
+    {
+      "name": "homes_estimate_rent_vs_buy",
+      "description": "Project the cumulative cost of buying a home versus renting over N years"
+    },
+    {
+      "name": "homes_get_by_address",
+      "description": "Resolve a US street address to its canonical homes.com property URL + property hash"
+    },
+    {
+      "name": "homes_register_session",
+      "description": "Record (or refresh) which Homes.com account the signed-in session belongs to"
+    },
+    {
+      "name": "homes_set_active_session",
+      "description": "Mark a registered session_id as the current account label (label only)"
+    },
+    {
+      "name": "homes_get_session_context",
+      "description": "List every registered account label plus the current active_session_id"
+    },
+    {
+      "name": "homes_bulk_get",
+      "description": "Fetch up to 200 homes.com properties in one call (structured records only)"
+    },
+    {
+      "name": "homes_resolve_addresses",
+      "description": "Resolve up to 100 street addresses to homes.com property URLs in one call"
     }
   ]
 }
