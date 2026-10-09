@@ -34,7 +34,6 @@ export function requireLocationSlug(location: string): string {
   return slug;
 }
 
-
 /**
  * `/property/<slug>/<id>/` (trailing slash and query string optional).
  * Each segment must start alphanumeric and contain only URL-safe slug
