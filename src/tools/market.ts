@@ -61,7 +61,7 @@ export function registerMarketTools(
     {
       title: "Get a homes.com market report for a location",
       description:
-        "Fetch homes.com's recently-sold listings for a city/ZIP/neighborhood and derive a market summary: count, median sale price, and average $/sqft across the sample. Pass `location` — free-text (e.g. 'Brooklyn, NY', '30311'). Returns `{ region, slug, sold_summary, sample_sold }`. Note: homes.com's sold page typically returns ~40 recent listings — this is a sample-based summary, not an exhaustive market index. Read-only.",
+        "Fetch homes.com's recently-sold listings for a city/ZIP/neighborhood and derive a market summary: count, median sale price, and average $/sqft across the sample. Pass `location` — free-text (e.g. 'Brooklyn, NY', '30311'). `location` is required and must contain Latin letters or digits — a blank or unsluggable location (e.g. only punctuation or non-Latin script) is rejected with an error rather than returning an empty result. Returns `{ region, slug, sold_summary, sample_sold }`. Note: homes.com's sold page typically returns ~40 recent listings — this is a sample-based summary, not an exhaustive market index. Read-only.",
       annotations: {
         title: "Get a homes.com market report for a location",
         readOnlyHint: true,
