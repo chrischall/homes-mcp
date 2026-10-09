@@ -73,4 +73,19 @@ describe('homes_get_market_report tool', () => {
     expect(r.isError).toBe(true);
     expect(JSON.stringify(r.content)).toMatch(/Could not locate JSON-LD/);
   });
+
+  it('rejects an unsluggable location without fetching the homepage (fleet-audit#497)', async () => {
+    fetch.mockClear();
+    const r = await h.callTool('homes_get_market_report', { location: '東京' });
+    expect(r.isError).toBe(true);
+    expect(JSON.stringify(r.content)).toMatch(/could not turn location/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty location at the schema (fleet-audit#497)', async () => {
+    fetch.mockClear();
+    const r = await h.callTool('homes_get_market_report', { location: '' });
+    expect(r.isError).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });

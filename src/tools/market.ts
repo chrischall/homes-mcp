@@ -4,7 +4,7 @@ import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import { extractJsonLd } from "../page-state.js";
 import { findListings, formatHome, type FormattedHome } from "./search.js";
-import { locationToSlug } from "../url.js";
+import { requireLocationSlug } from "../url.js";
 
 /**
  * `homes_get_market_report` — derive a sample-based market summary from
@@ -71,12 +71,13 @@ export function registerMarketTools(
       inputSchema: z.object({
         location: z
           .string()
+          .min(1)
           .describe("Free-text location: city, ZIP, neighborhood"),
         view: viewArg(),
       }),
     },
     async ({ location, view }) => {
-      const slug = locationToSlug(location);
+      const slug = requireLocationSlug(location);
       const path = `/${slug}/sold/`;
       const html = await client.fetchHtml(path);
       const doc = extractJsonLd(html);
