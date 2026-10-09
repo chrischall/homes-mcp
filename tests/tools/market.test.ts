@@ -89,3 +89,17 @@ describe('homes_get_market_report tool', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('homes_get_market_report location contract (fleet-audit#497)', () => {
+  it('documents that an unsluggable location is an error, not an empty market', async () => {
+    const c = { fetchHtml: vi.fn() } as unknown as HomesClient;
+    const th = await createTestHarness((s) => registerMarketTools(s, c));
+    try {
+      const tool = (await th.listTools()).find((t) => t.name === 'homes_get_market_report');
+      expect(tool?.description).toMatch(/`location` is required/);
+      expect(tool?.description).toMatch(/rejected with an error/);
+    } finally {
+      await th.close();
+    }
+  });
+});

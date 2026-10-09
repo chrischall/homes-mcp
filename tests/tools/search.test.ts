@@ -618,3 +618,16 @@ describe('homes_search_properties tool', () => {
     expect(mockFetchHtml).not.toHaveBeenCalled();
   });
 });
+
+describe('homes_search_properties location contract (fleet-audit#497)', () => {
+  it('documents that an unsluggable location is an error, not an empty result', async () => {
+    const th = await createTestHarness((s) => registerSearchTools(s, mockClient));
+    try {
+      const tool = (await th.listTools()).find((t) => t.name === 'homes_search_properties');
+      expect(tool?.description).toMatch(/`location` is required/);
+      expect(tool?.description).toMatch(/rejected with an error/);
+    } finally {
+      await th.close();
+    }
+  });
+});

@@ -12,7 +12,7 @@ homes.com real-estate access as an MCP server for Claude — search listings, re
 
 | Tool | Purpose |
 | --- | --- |
-| `homes_search_properties` | Search listings by free-text location (city/ZIP/neighborhood). Slugifies the input into homes.com's URL routing and parses the JSON-LD `CollectionPage.mainEntity.itemListElement[]`. Filters by `property_type`, `listing_type`, `sort`, and a `price_min`/`price_max` band. Returns address, price, beds/baths, sqft, primary photo, listing agent + brokerage; flags `truncated`/`total_estimated` past the ~40-listing SSR cap. |
+| `homes_search_properties` | Search listings by free-text location (city/ZIP/neighborhood). Slugifies the input into homes.com's URL routing (a blank or unsluggable location is an error, not an empty result) and parses the JSON-LD `CollectionPage.mainEntity.itemListElement[]`. Filters by `property_type`, `listing_type`, `sort`, and a `price_min`/`price_max` band. Returns address, price, beds/baths, sqft, primary photo, listing agent + brokerage; flags `truncated`/`total_estimated` past the ~40-listing SSR cap. |
 | `homes_get_by_address` | Resolve one US street address to its canonical homes.com property URL + opaque hash. Walks structured typeahead → slug → city/zip search-fallback with whole-token street + unit verification. Returns `matched_via`; degrades to `{ resolved: false }`. |
 | `homes_resolve_addresses` | Bulk `homes_get_by_address` (up to 100 addresses, input order preserved, per-row outcomes). Prefer for batches ≥ 3. |
 | `homes_get_property` | Full record for a property by URL. Parses JSON-LD + DOM-side sections: address, lat/lng, beds/baths, sqft, year built, price, status, agent (name/title/profile — telephone/email only with `include_agent_contact: true`) + brokerage, highlights, schools, HOA (raw + monthly), lot size (sqft + acres), parking, heating/cooling, MLS id/source, tax, days-on-market, price drops, `extracted_features`. Optional inline `price_history`/`tax_history`. |
@@ -23,7 +23,7 @@ homes.com real-estate access as an MCP server for Claude — search listings, re
 | `homes_get_history` | Combined price + tax history in one fetch: `listing_events`, `ownership_events`, `lien_events`, normalized `events_normalized`, and `tax_records`. `events_normalized` sets `price_change_pct` only on `PriceChange` rows; other rows carry homes.com's "List to Sale" figure as `list_to_sale_pct` (no `dom` / `source_mls` keys). |
 | `homes_get_property_history` | *Deprecated* — price/ownership/lien timelines only. Prefer `homes_get_history`. |
 | `homes_get_tax_history` | *Deprecated* — year-by-year tax records only. Prefer `homes_get_history`. |
-| `homes_get_market_report` | Median / average / $-per-sqft for a market, derived from the `sold` search page's JSON-LD. |
+| `homes_get_market_report` | Median / average / $-per-sqft for a market, derived from the `sold` search page's JSON-LD. A blank or unsluggable location is an error, not an empty market. |
 | `homes_get_saved_homes` | The signed-in user's saved (favorited) homes. Auth-gated. |
 | `homes_get_saved_searches` | The signed-in user's saved searches. Auth-gated. |
 | `homes_calculate_affordability` | Local affordability calculator — max purchase price from income + DTI + rates. No network. |
