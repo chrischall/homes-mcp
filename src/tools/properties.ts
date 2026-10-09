@@ -4,7 +4,7 @@ import type { HomesClient } from "../client.js";
 import { viewArg, viewResponse } from "../view.js";
 import { collectAddressAlternates } from "@chrischall/realty-core";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
-import { urlToPath } from "../url.js";
+import { propertyPath } from "../url.js";
 import {
   toNumber,
   firstImage,
@@ -303,10 +303,12 @@ export function extractPropertyId(listing: JsonLdListing): string {
 /**
  * Build the path for a homes.com property URL. The user passes the
  * full URL (from a `homes_search_properties` result's `url` field);
- * we reduce it via `urlToPath` and hand it to the transport.
+ * we reduce it via `propertyPath` (which refuses anything that isn't a
+ * `/property/<slug>/<id>/` detail page — fleet-audit#501) and hand it to
+ * the transport.
  */
 export function buildPath(args: { url?: string }): string {
-  if (args.url) return urlToPath(args.url);
+  if (args.url) return propertyPath(args.url);
   throw new Error("homes property tool: must provide `url`");
 }
 

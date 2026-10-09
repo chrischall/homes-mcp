@@ -320,6 +320,19 @@ describe('homes_get_history (combined) tool — #31', () => {
     expect(p.tax_records.length).toBeGreaterThan(0);
   });
 
+  it.each(['homes_get_history', 'homes_get_property_history', 'homes_get_tax_history'])(
+    '%s refuses a non-property path without fetching it (fleet-audit#501)',
+    async (tool) => {
+      fetch3.mockClear();
+      const r = await hc.callTool(tool, {
+        url: 'https://www.homes.com/customer/dashboard/favorites/',
+      });
+      expect(r.isError).toBe(true);
+      expect(JSON.stringify(r.content)).toMatch(/not a homes\.com property detail URL/);
+      expect(fetch3).not.toHaveBeenCalled();
+    },
+  );
+
   it('returns empty series for a listing with no history sections', async () => {
     fetch3.mockResolvedValueOnce(EMPTY);
     const p = parseToolResult<{

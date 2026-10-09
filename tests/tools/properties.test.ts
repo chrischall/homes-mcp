@@ -38,6 +38,30 @@ describe('buildPath', () => {
   it('throws when no url is provided', () => {
     expect(() => buildPath({})).toThrow(/must provide `url`/);
   });
+
+  it('keeps a query string on a property-detail path', () => {
+    expect(buildPath({ url: 'https://www.homes.com/property/foo/abc123/?ref=search' })).toBe(
+      '/property/foo/abc123/?ref=search'
+    );
+  });
+
+  it('accepts a property path without the trailing slash', () => {
+    expect(buildPath({ url: '/property/foo/abc123' })).toBe('/property/foo/abc123');
+  });
+
+  it.each([
+    'https://www.homes.com/customer/dashboard/favorites/',
+    '/customer/dashboard/saved-searches/',
+    'https://www.homes.com/sign-out',
+    'https://www.homes.com/atlanta-ga/',
+    '/property/abc123/',
+    '/property/foo/abc123/extra/',
+    '/property/x/../../customer/dashboard/',
+    '/property/%2e%2e/%2e%2e/customer/',
+    '/property/./abc/',
+  ])('rejects a non-property-detail path %j (fleet-audit#501)', (url) => {
+    expect(() => buildPath({ url })).toThrow(/not a homes\.com property detail URL/);
+  });
 });
 
 describe('extractPropertyId', () => {

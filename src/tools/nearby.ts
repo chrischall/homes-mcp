@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
 import { minifiedResult } from "../mcp.js";
 import { parseHtml, type HTMLElement } from "../html.js";
-import { urlToPath } from "../url.js";
+import { propertyPath } from "../url.js";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
 
 /**
@@ -139,7 +139,7 @@ export function registerNearbyTools(
       }),
     },
     async ({ url, limit, include_rentals }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const all = parseNearbyListings(root, { include_rentals });

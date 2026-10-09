@@ -10,7 +10,7 @@ import {
   parsePercent,
   type HTMLElement,
 } from "../html.js";
-import { urlToPath } from "../url.js";
+import { propertyPath } from "../url.js";
 import { lastPathSegment } from "../jsonld.js";
 import {
   mapEventType,
@@ -256,7 +256,7 @@ export function registerHistoryTools(
       }),
     },
     async ({ url }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const listing_events = parsePropertyHistory(root);
@@ -290,7 +290,7 @@ export function registerHistoryTools(
       }),
     },
     async ({ url }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       return minifiedResult({
@@ -321,7 +321,7 @@ export function registerHistoryTools(
       }),
     },
     async ({ url }) => {
-      const path = urlToPath(url);
+      const path = propertyPath(url);
       const html = await client.fetchHtml(path);
       const root = parseHtml(html);
       const listing_events = parsePropertyHistory(root);
