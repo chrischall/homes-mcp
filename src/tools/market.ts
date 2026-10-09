@@ -80,6 +80,13 @@ export function registerMarketTools(
       const path = `/${slug}/sold/`;
       const html = await client.fetchHtml(path);
       const doc = extractJsonLd(html);
+      // Throw like homes_search_properties rather than reporting a
+      // zero-count market for a page we couldn't read (fleet-audit#496).
+      if (!doc) {
+        throw new Error(
+          `Could not locate JSON-LD at ${path}. homes.com may have changed their page structure.`,
+        );
+      }
       const { items } = findListings(doc);
       const sample = items
         .map(formatHome)
