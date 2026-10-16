@@ -374,6 +374,35 @@ describe('homes_get_by_address tool', () => {
       });
     });
 
+    it('resolves a full address pasted into `address` (city / state / ZIP included) — fleet-audit#1262', async () => {
+      // realty-core <=0.6.3 scored the whole query against the street-only
+      // listing line: 3 of 6 tokens = 0.5, so every rung rejected the house.
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('fallbackhash', '126 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln, Lake Lure, NC 28746',
+        city: 'Lake Lure',
+        state: 'NC',
+      });
+      const parsed = parseToolResult<ByAddressResult>(r);
+      expect(parsed).toMatchObject({ resolved: true, property_hash: 'fallbackhash' });
+    });
+
+    it('still rejects a different house for a pasted full address', async () => {
+      mockFetchHtml.mockResolvedValueOnce('<html>nothing here</html>');
+      mockFetchHtml.mockResolvedValueOnce(
+        collectionHtml([itemFor('otherhash', '128 Sleeping Bear Ln')])
+      );
+      const r = await harness.callTool('homes_get_by_address', {
+        address: '126 Sleeping Bear Ln, Lake Lure, NC 28746',
+        city: 'Lake Lure',
+        state: 'NC',
+      });
+      expect(parseToolResult<ByAddressResult>(r).resolved).toBe(false);
+    });
+
     it('falls back when the slug rung returns an empty CollectionPage', async () => {
       mockFetchHtml.mockResolvedValueOnce(collectionHtml([], 0));
       mockFetchHtml.mockResolvedValueOnce(
