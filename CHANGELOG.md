@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.11](https://github.com/chrischall/homes-mcp/compare/v2.1.10...v2.1.11) (2026-10-16)
+
+
+### Bug Fixes
+
+* **deps:** bump realty-core to 0.6.4 so pasted full addresses resolve ([#278](https://github.com/chrischall/homes-mcp/issues/278)) ([701e4bf](https://github.com/chrischall/homes-mcp/commit/701e4bf7f0b96c638031c737a10413b344ec9569))
+* **deps:** bump the production-dependencies group with 4 updates ([#276](https://github.com/chrischall/homes-mcp/issues/276)) ([f8b39c1](https://github.com/chrischall/homes-mcp/commit/f8b39c1903d97e601a66f8c0cf48f2e5131a2f52))
+* **plugin:** launch the published package so marketplace installs start ([#279](https://github.com/chrischall/homes-mcp/issues/279)) ([99cd2c2](https://github.com/chrischall/homes-mcp/commit/99cd2c22d977ac1762e23c4a01fbcd59e751b81d))
+
 ## [2.1.10](https://github.com/chrischall/homes-mcp/compare/v2.1.9...v2.1.10) (2026-10-09)
 
 
