@@ -1,0 +1,6 @@
+# Public homes.com property hashes (the id in a listing URL /property/<slug>/<hash>/),
+# not secrets — fleet-audit#1379.
+64d8f9e5a24617377b2b736b7f58bbfbac4ed2eb:skills/homes-fpx/references/homes-requests.md:generic-api-key:222
+14f0a841ba40801b13f9cb0bd3de533ae77eca70:tests/tools/typeahead.test.ts:generic-api-key:59
+14f0a841ba40801b13f9cb0bd3de533ae77eca70:src/tools/typeahead.ts:generic-api-key:29
+14f0a841ba40801b13f9cb0bd3de533ae77eca70:tests/tools/by-address.test.ts:generic-api-key:534
