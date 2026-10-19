@@ -4,6 +4,18 @@ slug: homes
 summary: >-
   homes.com real-estate access for Claude — search listings, fetch property
   details, photos, compare, and run mortgage/affordability math
+examples:
+  - prompt: >-
+      Show me the newest single-family homes for sale in Asheville, NC
+      between $400,000 and $600,000.
+    note: Uses homes_search_properties with a price band and sort.
+  - prompt: >-
+      What are the median sold price and price per square foot in Boone, NC?
+    note: Uses homes_get_market_report (derived from recent sold listings).
+  - prompt: >-
+      What would the monthly payment be on a $450,000 home with 20% down at
+      6.5% for 30 years, including taxes and insurance?
+    note: Local mortgage math (homes_calculate_mortgage), no browser needed.
 #
 # Hosting note (a comment, not user-facing summary text): this is a
 # BROWSER-BRIDGE MCP — it reaches its site through the user's signed-in
