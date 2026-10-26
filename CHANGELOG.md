@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.12](https://github.com/chrischall/homes-mcp/compare/v2.1.11...v2.1.12) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group with 3 updates ([#285](https://github.com/chrischall/homes-mcp/issues/285)) ([5d60d09](https://github.com/chrischall/homes-mcp/commit/5d60d094d1b399d47a74dab15f8c2fc19ecc4040))
+
+
+### Documentation
+
+* **mint:** add sample prompts for the public catalog ([#283](https://github.com/chrischall/homes-mcp/issues/283)) ([3f19255](https://github.com/chrischall/homes-mcp/commit/3f19255848b104c56af36daa298ba9011c88d398))
+
 ## [2.1.11](https://github.com/chrischall/homes-mcp/compare/v2.1.10...v2.1.11) (2026-10-16)
 
 
