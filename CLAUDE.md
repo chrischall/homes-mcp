@@ -67,6 +67,8 @@ src/
                         #   normalizeDate/Dollar/Percent/IntegerLoose/
                         #   DecimalLoose normalizers.
   tools/
+    hints.ts            # `_meta.mint` context-group hints (homeMeta) + withHints,
+                        #   which adds them to the shared registrars' tools
     search.ts           # homes_search_properties (buildSearchPath +
                         #   path-based property_type/listing_type/sort)
     properties.ts       # homes_get_property (JSON-LD + DOM-side scrape:

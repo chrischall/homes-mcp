@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { minifiedResult } from "../mcp.js";
 import {
   parseHtml,
@@ -251,6 +252,7 @@ export function registerHistoryTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["price history", "sale history"] }),
       inputSchema: z.object({
         url: z.string().describe("homes.com property detail URL or path."),
       }),
@@ -285,6 +287,7 @@ export function registerHistoryTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["property taxes", "tax history"] }),
       inputSchema: z.object({
         url: z.string().describe("homes.com property detail URL or path."),
       }),
@@ -316,6 +319,7 @@ export function registerHistoryTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["price history", "sale history", "property taxes"] }),
       inputSchema: z.object({
         url: z.string().describe("homes.com property detail URL or path."),
       }),

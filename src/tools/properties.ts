@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { viewArg, viewResponse } from "../view.js";
 import { collectAddressAlternates } from "@chrischall/realty-core";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
@@ -528,6 +529,7 @@ export function registerPropertyTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["listing details", "house details"] }),
       inputSchema: z.object({
         url: z
           .string()

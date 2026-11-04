@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { minifiedResult } from "../mcp.js";
 import {
   parseHtml,
@@ -141,6 +142,7 @@ export function registerSavedTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["saved homes", "favorite homes", "favorites"] }),
       inputSchema: z.object({}),
     },
     async () => {
@@ -163,6 +165,7 @@ export function registerSavedTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["saved searches"] }),
       inputSchema: z.object({}),
     },
     async () => {

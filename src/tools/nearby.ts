@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { minifiedResult } from "../mcp.js";
 import { parseHtml, type HTMLElement } from "../html.js";
 import { propertyPath } from "../url.js";
@@ -122,6 +123,7 @@ export function registerNearbyTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["homes nearby", "nearby listings"] }),
       inputSchema: z.object({
         url: z.string().describe("homes.com property detail URL or path."),
         limit: z

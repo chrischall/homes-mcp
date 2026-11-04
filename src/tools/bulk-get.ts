@@ -8,6 +8,7 @@ import {
 } from "@chrischall/mcp-utils/fetchproxy";
 import { runRowBatch } from "@chrischall/realty-core";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { viewArg, viewResponse } from "../view.js";
 import {
   includeAgentContactArg,
@@ -72,6 +73,7 @@ export function registerBulkGetTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup"),
       inputSchema: z.object({
         urls: z
           .array(z.string())

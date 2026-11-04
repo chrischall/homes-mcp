@@ -7,6 +7,7 @@ import {
   retryOnceOnTimeout,
 } from "@chrischall/mcp-utils/fetchproxy";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { minifiedResult } from "../mcp.js";
 import {
   ResolveAbortedError,
@@ -96,6 +97,7 @@ export function registerResolveAddressesTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup"),
       inputSchema: z.object({
         addresses: z
           .array(
