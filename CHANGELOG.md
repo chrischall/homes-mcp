@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.2.0](https://github.com/chrischall/homes-mcp/compare/v2.1.11...v2.2.0) (2026-11-04)
+
+
+### Features
+
+* context-group hints, applied to the shared calculator and session registrars too ([#288](https://github.com/chrischall/homes-mcp/issues/288)) ([5df114d](https://github.com/chrischall/homes-mcp/commit/5df114d12a1cc2c24dce2b6b812b6426a2f3df2c))
+
+
+### Bug Fixes
+
+* **deps:** bump the production-dependencies group across 1 directory with 3 updates ([#287](https://github.com/chrischall/homes-mcp/issues/287)) ([31d7788](https://github.com/chrischall/homes-mcp/commit/31d77880ed5480f57f73edbd7c33a92a102de32f))
+* **deps:** bump the production-dependencies group with 3 updates ([#285](https://github.com/chrischall/homes-mcp/issues/285)) ([5d60d09](https://github.com/chrischall/homes-mcp/commit/5d60d094d1b399d47a74dab15f8c2fc19ecc4040))
+
+
+### Documentation
+
+* **mint:** add sample prompts for the public catalog ([#283](https://github.com/chrischall/homes-mcp/issues/283)) ([3f19255](https://github.com/chrischall/homes-mcp/commit/3f19255848b104c56af36daa298ba9011c88d398))
+
 ## [2.1.11](https://github.com/chrischall/homes-mcp/compare/v2.1.10...v2.1.11) (2026-10-16)
 
 
