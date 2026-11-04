@@ -154,6 +154,25 @@ output.
 - "List my saved homes on homes.com" → `homes_get_saved_homes`
 - "Monthly payment on a $500k home, 20% down, 6.5% rate" → `homes_calculate_mortgage`
 
+## In context groups
+
+homes-mcp joins the **home** group (`_meta.mint.domain: "home"`). It has
+**no canonical read**: homes.com serves listings, price/tax history, market
+reports and the signed-in user's saved homes and searches, none of which is a
+dated feed that answers "what's new / due / on", and it has no listable
+subjects (children, properties you own, accounts) to name. So the group never
+asks homes for a what's-new/due/on answer; every read is a `lookup`, and the
+local calculators and session-label writes are `other`.
+
+A compound ask reaches homes only for the lookup part — "is the pool heater on,
+and what are 3-bed homes going for in Decatur?" → the home group answers the
+pool from its own canonical source and routes the second half to
+`homes_search_properties` or `homes_get_market_report`.
+
+homes-mcp is browser-bridged: when no signed-in homes.com tab is attached to
+the ContextMint Bridge, the group answers "homes.com needs your browser open"
+rather than an empty result.
+
 ## Gotchas
 
 - **AWS WAF challenge.** homes.com (CoStar) gates traffic through AWS WAF and occasionally serves a challenge page to fresh sessions. Solving it in the Chrome tab once unblocks subsequent fetches; the client detects the interstitial and throws `SessionNotAuthenticatedError`.

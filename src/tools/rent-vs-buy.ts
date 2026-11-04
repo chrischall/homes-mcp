@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { homeMeta } from "./hints.js";
 import {
   estimateRentVsBuy as coreEstimateRentVsBuy,
   MAX_HORIZON_YEARS,
@@ -76,6 +77,7 @@ export function registerRentVsBuyTools(server: McpServer): void {
         idempotentHint: true,
         openWorldHint: false,
       },
+      _meta: homeMeta("other", { aliases: ["rent or buy", "rent vs buy"] }),
       inputSchema: z.object({
         home_price: z.number().positive(),
         down_payment: z.number().nonnegative(),

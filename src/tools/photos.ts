@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { extractImgTags } from "@chrischall/mcp-utils/fetchproxy";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { minifiedResult } from "../mcp.js";
 import { lastPathSegment } from "../jsonld.js";
 import { fetchListingRecord } from "./properties.js";
@@ -80,6 +81,7 @@ export function registerPhotosTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["listing photos", "house pictures"] }),
       inputSchema: z.object({
         url: z
           .string()

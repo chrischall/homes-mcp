@@ -7,6 +7,7 @@ import {
   type AffordabilityResult,
 } from "@chrischall/realty-core";
 import { minifiedResult } from "../mcp.js";
+import { homeMeta, withHints } from "./hints.js";
 
 /**
  * Local-only affordability calculator (28/36 DTI). The math, schema and
@@ -21,9 +22,16 @@ export function computeAffordability(
 }
 
 export function registerAffordabilityTools(server: McpServer): void {
-  registerAffordabilityTool(server, {
-    z,
-    prefix: "homes",
-    toResult: minifiedResult,
-  });
+  registerAffordabilityTool(
+    withHints(server, {
+      homes_calculate_affordability: homeMeta("other", {
+        aliases: ["how much house can i afford", "affordability"],
+      }),
+    }),
+    {
+      z,
+      prefix: "homes",
+      toResult: minifiedResult,
+    },
+  );
 }

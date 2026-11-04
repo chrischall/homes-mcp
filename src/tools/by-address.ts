@@ -11,6 +11,7 @@ import {
   SessionNotAuthenticatedError,
   type HomesClient,
 } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { minifiedResult } from "../mcp.js";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
 import { locationToSlug } from "../url.js";
@@ -720,6 +721,7 @@ export function registerByAddressTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["look up an address", "find this house"] }),
       inputSchema: z.object({
         address: z
           .string()

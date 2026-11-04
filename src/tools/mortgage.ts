@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { registerMortgageTool } from "@chrischall/realty-core";
 import { minifiedResult } from "../mcp.js";
+import { homeMeta, withHints } from "./hints.js";
 
 /**
  * `homes_calculate_mortgage` — local-only PITI calculator. Schema,
@@ -12,10 +13,17 @@ import { minifiedResult } from "../mcp.js";
  * `MAX_LOAN_TERM_YEARS` there.
  */
 export function registerMortgageTools(server: McpServer): void {
-  registerMortgageTool(server, {
-    z,
-    prefix: "homes",
-    shape: "lean",
-    toResult: minifiedResult,
-  });
+  registerMortgageTool(
+    withHints(server, {
+      homes_calculate_mortgage: homeMeta("other", {
+        aliases: ["mortgage payment", "monthly payment", "mortgage"],
+      }),
+    }),
+    {
+      z,
+      prefix: "homes",
+      shape: "lean",
+      toResult: minifiedResult,
+    },
+  );
 }

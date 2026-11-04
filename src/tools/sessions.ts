@@ -3,6 +3,7 @@ import {
   registerSessionTools as registerSharedSessionTools,
   type SessionRegistry,
 } from "@chrischall/mcp-utils/session";
+import { homeMeta, withHints } from "./hints.js";
 
 /**
  * MCP tool surface for the shared session registry (#20, #21).
@@ -30,7 +31,7 @@ export function registerSessionsTools(
   server: McpServer,
   registry: SessionRegistry,
 ): void {
-  registerSharedSessionTools(withAdditiveSessionWrites(server), registry, {
+  registerSharedSessionTools(withAdditiveSessionWrites(withHints(server, SESSION_HINTS)), registry, {
     prefix: "homes",
     serviceLabel: "Homes.com",
     routing: "label-only",
@@ -39,6 +40,16 @@ export function registerSessionsTools(
       "Bridge extension is signed into; to read a different account, sign that tab into it.",
   });
 }
+
+/**
+ * Context-group hints for the shared trio: the read is a lookup; the two
+ * label-only registry writes switch nothing and send nothing, so `other`.
+ */
+const SESSION_HINTS = {
+  homes_get_session_context: homeMeta("lookup"),
+  homes_register_session: homeMeta("other"),
+  homes_set_active_session: homeMeta("other"),
+};
 
 /**
  * The two session writes, classified by the inverse test. The shared

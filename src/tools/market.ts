@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { viewArg, viewResponse } from "../view.js";
 import { extractJsonLd } from "../page-state.js";
 import { findListings, formatHome, type FormattedHome } from "./search.js";
@@ -68,6 +69,7 @@ export function registerMarketTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["housing market", "home prices", "sold homes"] }),
       inputSchema: z.object({
         location: z
           .string()

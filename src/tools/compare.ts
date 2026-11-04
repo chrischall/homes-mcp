@@ -8,6 +8,7 @@ import {
 } from "@chrischall/mcp-utils/fetchproxy";
 import { pivotSummary, runRowBatch, type SummaryRow } from "@chrischall/realty-core";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { viewArg, viewResponse } from "../view.js";
 import {
   includeAgentContactArg,
@@ -78,6 +79,7 @@ export function registerCompareTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["compare houses", "compare listings"] }),
       inputSchema: z.object({
         view: viewArg(),
         targets: z

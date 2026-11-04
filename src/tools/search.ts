@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { HomesClient } from "../client.js";
+import { homeMeta } from "./hints.js";
 import { viewArg, viewResponse } from "../view.js";
 import { extractJsonLd, findGraphNode } from "../page-state.js";
 import { requireLocationSlug } from "../url.js";
@@ -366,6 +367,7 @@ export function registerSearchTools(
         idempotentHint: true,
         openWorldHint: true,
       },
+      _meta: homeMeta("lookup", { aliases: ["homes for sale", "houses for sale", "listings", "real estate", "house hunting"] }),
       inputSchema: z.object({
         view: viewArg(),
         location: z
